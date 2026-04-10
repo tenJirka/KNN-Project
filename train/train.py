@@ -11,6 +11,9 @@ from pytorch_metric_learning import losses, miners
 from shared import GenericReIDModel
 from torch.utils.data import DataLoader, Dataset
 
+# For faster learning
+torch.set_float32_matmul_precision("medium")
+
 
 class VeRiDataset(Dataset):
     """Specific implementation for VeRi dataset"""
@@ -88,6 +91,7 @@ if __name__ == "__main__":
     model = GenericReIDModel("resnet50")
 
     # Create criterion metrics with number of classes matching number of ids in VeRi train set
+    # Using [NormalizedSoftmaxLoss](https://kevinmusgrave.github.io/pytorch-metric-learning/losses/#normalizedsoftmaxloss)
     criterion_metric = losses.NormalizedSoftmaxLoss(
         num_classes=NUM_VERI_TRAIN_CLASSES, embedding_size=model.feature_dim
     )
@@ -120,7 +124,10 @@ if __name__ == "__main__":
     )
 
     trainer = pl.Trainer(
-        max_epochs=10, callbacks=[checkpoint_callback], accelerator="gpu"
+        max_epochs=10,
+        callbacks=[checkpoint_callback],
+        accelerator="gpu",
+        # precision="bf16-mixed",  # Not working as expected on my RX 9070 XT, disabling for now
     )
 
     # Time to train!
