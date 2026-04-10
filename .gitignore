@@ -216,3 +216,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 datasets
+lightning_logs
+checkpoints
