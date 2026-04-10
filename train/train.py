@@ -8,7 +8,7 @@ import torchvision.transforms as T
 from PIL import Image
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_metric_learning import losses, miners
-from shared import GenericReIDModel
+from shared import GenericReIDModel, ReIDLightningModel
 from torch.utils.data import DataLoader, Dataset
 
 # For faster learning
@@ -45,43 +45,6 @@ class VeRiDataset(Dataset):
             image = self.transform(image)
 
         return image, label
-
-
-class ReIDLightningModel(pl.LightningModule):
-    def __init__(self, model, criterion_metric, miner):
-        super().__init__()
-        self.model = model
-        self.criterion_metric = criterion_metric
-        self.miner = miner
-
-    def training_step(self, batch, batch_idx):
-        images, labels = batch
-
-        features = self.model(images)
-
-        # Use mainer to get hardest pairs from batch
-        hard_pairs = self.miner(features, labels)
-
-        # Calculate loss only for hard pairs
-        loss = self.criterion_metric(features, labels, hard_pairs)
-
-        self.log("train_loss", loss, prog_bar=True)
-
-        # NOTE: Logging how many hard pairs was found
-        self.log("mined_pairs", float(len(hard_pairs[0])), prog_bar=False)
-
-        return loss
-
-    def configure_optimizers(self):
-        # Use same optimizer for loss functions and model itself
-        # TODO: Do more research on optimisers and learning rates
-        optimizer = torch.optim.Adam(
-            [
-                {"params": self.model.parameters(), "lr": 0.0003},
-                {"params": self.criterion_metric.parameters(), "lr": 0.001},
-            ]
-        )
-        return optimizer
 
 
 if __name__ == "__main__":
