@@ -22,8 +22,25 @@ def compute_reid_metrics(
     gallery_cids,
     max_rank=50,
 ):
+    def to_numpy(x):
+        if isinstance(x, torch.Tensor):
+            return x.cpu().numpy()
+        return np.asarray(x)
+
+    # Sanitize all IDs and Camera IDs to NumPy arrays
+    query_vids = to_numpy(query_vids)
+    query_cids = to_numpy(query_cids)
+    gallery_vids = to_numpy(gallery_vids)
+    gallery_cids = to_numpy(gallery_cids)
+
+    # Sanitize features to ensure they are PyTorch tensors on CPU for similarity computation
+    if not isinstance(query_features, torch.Tensor):
+        query_features = torch.tensor(query_features)
+    if not isinstance(gallery_features, torch.Tensor):
+        gallery_features = torch.tensor(gallery_features)
+
     # Calculate cosine similarity using matrix multiplication
-    similarities = torch.mm(query_features, gallery_features.t()).numpy()
+    similarities = torch.mm(query_features, gallery_features.t()).cpu().numpy()
 
     num_q, num_g = similarities.shape
 
@@ -62,8 +79,13 @@ def compute_reid_metrics(
         # Compute Average Precision (AP) for this query
         all_ap.append(compute_average_precision(raw_cmc))
 
-    mAP = np.mean(all_ap)
     all_cmc = np.asarray(all_cmc).astype(np.float32)
-    mean_cmc = all_cmc.sum(0) / len(all_ap)
 
-    return mAP, mean_cmc
+    if len(all_ap) > 0:
+        mean_cmc = all_cmc.sum(0) / len(all_ap)
+        mAP = np.mean(all_ap)
+    else:
+        mean_cmc = np.zeros(max_rank)
+        mAP = 0.0
+
+    return mAP, np.atleast_1d(mean_cmc)
