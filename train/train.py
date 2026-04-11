@@ -151,6 +151,7 @@ if __name__ == "__main__":
     )
 
     NUM_VERI_TRAIN_CLASSES = len(train_label_map)
+    print(f"Number of classes in training set: {NUM_VERI_TRAIN_CLASSES}")
 
     # Create criterion metrics with number of classes matching number of ids in VeRi train set
     # Using [NormalizedSoftmaxLoss](https://kevinmusgrave.github.io/pytorch-metric-learning/losses/#normalizedsoftmaxloss)
