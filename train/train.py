@@ -11,7 +11,6 @@ from pytorch_metric_learning import losses, miners
 from shared import GenericReIDModel, ReIDLightningModel
 from torch.utils.data import DataLoader, Dataset, Subset
 import random
-from util import DatasetSubset
 
 # For faster learning
 torch.set_float32_matmul_precision("medium")
@@ -54,6 +53,28 @@ class VeRiDataset(Dataset):
         return image, label, cam_id
 
 
+class VeRiDatasetSubset(Dataset):
+    """Helper class to apply transformations to a subset of the dataset"""
+
+    def __init__(self, whole_dataset, subset_indices, transform, label_map=None):
+        self.subset = Subset(whole_dataset, subset_indices)
+        self.transform = transform
+        self.label_map = label_map
+
+    def __len__(self):
+        return len(self.subset)
+
+    def __getitem__(self, idx):
+        image, label, cam_id = self.subset[idx]
+        if self.transform:
+            image = self.transform(image)
+
+        if self.label_map is not None:
+            label = self.label_map[label]
+
+        return image, label, cam_id
+
+
 def get_veri_split(train_dataset: VeRiDataset, veri_percent=0.1, seed=42):
     """Helper function to get a random subset of the VeRi dataset for validation"""
     all_indices = list(train_dataset.id_to_class.keys())
@@ -76,7 +97,15 @@ def get_veri_split(train_dataset: VeRiDataset, veri_percent=0.1, seed=42):
         if int(img_name.split("_")[0]) in val_ids
     ]
 
-    return train_indices, val_indices
+    # while id_to_class maps raw Vehicle IDs -> Global Class
+    # but because some Global Classes went to validation set, we need to remap to continuous mapping
+    # train_label_map maps Global Class from VeRiDataset -> Train Class (which accounts for the Classes that went to validation set)
+    train_label_map = {
+        train_dataset.id_to_class[raw_id]: i
+        for i, raw_id in enumerate(sorted(train_ids))
+    }
+
+    return train_indices, val_indices, train_label_map
 
 
 if __name__ == "__main__":
@@ -104,27 +133,28 @@ if __name__ == "__main__":
         ]
     )
 
-    print(
-        "Number of classes in full VeRi train dataset:",
-        len(full_train_dataset.id_to_class),
-    )
-    train_subset_indices, val_subset_indices = get_veri_split(
+    train_subset_indices, val_subset_indices, train_label_map = get_veri_split(
         full_train_dataset, veri_percent=VAL_PERCENT
     )
 
     model = GenericReIDModel("resnet50")
-    train_dataset = DatasetSubset(
+    train_dataset = VeRiDatasetSubset(
         whole_dataset=full_train_dataset,
         subset_indices=train_subset_indices,
         transform=train_transform,
+        label_map=train_label_map,
     )
-    val_dataset = DatasetSubset(
+    val_dataset = VeRiDatasetSubset(
         whole_dataset=full_train_dataset,
         subset_indices=val_subset_indices,
         transform=validation_transform,
     )
 
-    NUM_VERI_TRAIN_CLASSES = int(576 * (1.0 - VAL_PERCENT))
+    NUM_VERI_TRAIN_CLASSES = len(train_label_map)
+    # print(f"Number of training classes (Vehicle IDs): {NUM_VERI_TRAIN_CLASSES}")
+    # import sys
+
+    # sys.exit(0)
 
     # Create criterion metrics with number of classes matching number of ids in VeRi train set
     # Using [NormalizedSoftmaxLoss](https://kevinmusgrave.github.io/pytorch-metric-learning/losses/#normalizedsoftmaxloss)
@@ -139,12 +169,22 @@ if __name__ == "__main__":
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=8)
 
     # Checkpoint callback
+    # NOTE: Unsure about this change, so leaving it commented
+    # checkpoint_callback = ModelCheckpoint(
+    #     dirpath="checkpoints/",
+    #     filename="reid-{epoch:02d}-{train_loss:.2f}",
+    #     save_top_k=3,
+    #     monitor="train_loss",
+    #     mode="min",
+    # )
+
+    # Instead of checkpointing based on less, checkpoint based on validation mAP
     checkpoint_callback = ModelCheckpoint(
         dirpath="checkpoints/",
-        filename="reid-{epoch:02d}-{train_loss:.2f}",
+        filename="reid-{epoch:02d}-{val_mAP:.4f}",
         save_top_k=3,
-        monitor="train_loss",
-        mode="min",
+        monitor="val_mAP",
+        mode="max",
     )
 
     trainer = pl.Trainer(
@@ -156,4 +196,4 @@ if __name__ == "__main__":
 
     # Time to train!
     lightning_model = ReIDLightningModel(model, criterion_metric, miner)
-    trainer.fit(lightning_model, train_loader)
+    trainer.fit(lightning_model, train_loader, val_loader)
