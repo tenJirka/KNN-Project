@@ -37,14 +37,19 @@ class VeRiDataset(Dataset):
         img_path = os.path.join(self.img_dir, img_name)
         image = Image.open(img_path).convert("RGB")
 
-        # Get ID and map them to the correct class
-        raw_id = int(img_name.split("_")[0])
+        parts = img_name.split("_")
+
+        # Get Vehicle ID and map it to the correct class label
+        raw_id = int(parts[0])
         label = self.id_to_class[raw_id]
+
+        # Get Camera ID (Strip the 'c' and convert to integer)
+        cam_id = int(parts[1].replace("c", ""))
 
         if self.transform:
             image = self.transform(image)
 
-        return image, label
+        return image, label, cam_id
 
 
 if __name__ == "__main__":
