@@ -108,21 +108,19 @@ if __name__ == "__main__":
         "Number of classes in full VeRi train dataset:",
         len(full_train_dataset.id_to_class),
     )
-    train_subset_ids, val_subset_ids = get_veri_split(
+    train_subset_indices, val_subset_indices = get_veri_split(
         full_train_dataset, veri_percent=VAL_PERCENT
     )
-    # NUM_VERI_TRAIN_CLASSES = len(train_subset.dataset.id_to_class)
-    # print(f"Number of classes in VeRi train subset: {NUM_VERI_TRAIN_CLASSES}")
 
     model = GenericReIDModel("resnet50")
     train_dataset = DatasetSubset(
         whole_dataset=full_train_dataset,
-        subset_indices=train_subset_ids,
+        subset_indices=train_subset_indices,
         transform=train_transform,
     )
     val_dataset = DatasetSubset(
         whole_dataset=full_train_dataset,
-        subset_indices=val_subset_ids,
+        subset_indices=val_subset_indices,
         transform=validation_transform,
     )
 
