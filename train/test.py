@@ -92,12 +92,16 @@ def evaluate_metrics(
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python test2.py <model_checkpoint_path>")
+    if len(sys.argv) != 4:
+        print(
+            "Usage: python test2.py <model_checkpoint_path> <model_name> <num_of_classes>"
+        )
         sys.exit(1)
 
     CHECKPOINT_PATH = sys.argv[1]
-    model = load_trained_model(CHECKPOINT_PATH, "resnet50", 576)
+    MODEL_NAME = sys.argv[2]
+    NUM_OF_CLASSES = int(sys.argv[3])
+    model = load_trained_model(CHECKPOINT_PATH, MODEL_NAME, NUM_OF_CLASSES)
 
     gallery_features, gallery_vids, gallery_cids = extract_features(TEST_DIR, "Gallery")
     query_features, query_vids, query_cids = extract_features(QUERY_DIR, "Queries")
