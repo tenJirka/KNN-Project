@@ -94,7 +94,7 @@ def evaluate_metrics(
 if __name__ == "__main__":
     if len(sys.argv) != 4:
         print(
-            "Usage: python test2.py <model_checkpoint_path> <model_name> <num_of_classes>"
+            "Usage: python test.py <model_checkpoint_path> <model_name> <num_of_classes>"
         )
         sys.exit(1)
 
