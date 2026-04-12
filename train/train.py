@@ -197,7 +197,7 @@ if __name__ == "__main__":
     )
 
     trainer = pl.Trainer(
-        max_epochs=10,
+        max_epochs=100,
         callbacks=[checkpoint_callback, early_stop_callback],
         accelerator="gpu",
         # precision="bf16-mixed",  # Not working as expected on my RX 9070 XT, disabling for now

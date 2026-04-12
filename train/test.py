@@ -4,7 +4,6 @@ import sys
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torchvision.transforms as T
 from PIL import Image
 from pytorch_metric_learning import losses, miners
 from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
