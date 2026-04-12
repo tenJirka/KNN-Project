@@ -1,13 +1,14 @@
 import os
-import torch
+import sys
+
 import numpy as np
+import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
 from PIL import Image
 from pytorch_metric_learning import losses, miners
 from shared import GenericReIDModel, ReIDLightningModel
 from tqdm import tqdm
-import sys
 from util import compute_reid_metrics
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

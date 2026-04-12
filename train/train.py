@@ -1,6 +1,7 @@
 """Main training file"""
 
 import os
+import random
 
 import pytorch_lightning as pl
 import torch
@@ -10,7 +11,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_metric_learning import losses, miners
 from shared import GenericReIDModel, ReIDLightningModel
 from torch.utils.data import DataLoader, Dataset, Subset
-import random
 
 # For faster learning
 torch.set_float32_matmul_precision("medium")
