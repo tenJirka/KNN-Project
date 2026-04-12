@@ -2,6 +2,7 @@
 
 import os
 import random
+import sys
 
 import pytorch_lightning as pl
 import torch
@@ -109,6 +110,13 @@ def get_veri_split(train_dataset: VeRiDataset, veri_percent=0.1, seed=42):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python train.py <checkpoints_path> <model_name>")
+        sys.exit(1)
+
+    CHECKPOINTS_PATH = sys.argv[1]
+    MODEL_NAME = sys.argv[2]
+
     # Number of ids in VeRi train dataset
     full_train_dataset = VeRiDataset(
         img_dir="../datasets/VeRi/image_train/", transform=None
@@ -137,7 +145,7 @@ if __name__ == "__main__":
         full_train_dataset, veri_percent=VAL_PERCENT
     )
 
-    model = GenericReIDModel("resnet50")
+    model = GenericReIDModel(MODEL_NAME)
     train_dataset = VeRiDatasetSubset(
         whole_dataset=full_train_dataset,
         subset_indices=train_subset_indices,
@@ -165,20 +173,10 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=8)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=8)
 
-    # Checkpoint callback
-    # NOTE: Unsure about this change, so leaving it commented
-    # checkpoint_callback = ModelCheckpoint(
-    #     dirpath="checkpoints/",
-    #     filename="reid-{epoch:02d}-{train_loss:.2f}",
-    #     save_top_k=3,
-    #     monitor="train_loss",
-    #     mode="min",
-    # )
-
     # Instead of checkpointing based on less, checkpoint based on validation mAP
     checkpoint_callback = ModelCheckpoint(
-        dirpath="checkpoints/",
-        filename="reid-{epoch:02d}-{val_mAP:.4f}",
+        dirpath=CHECKPOINTS_PATH,
+        filename=f"reid-{MODEL_NAME}" + "-{epoch:02d}-{val_mAP:.4f}",
         save_top_k=3,
         monitor="val_mAP",
         mode="max",
