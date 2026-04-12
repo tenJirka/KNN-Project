@@ -11,7 +11,8 @@ from PIL import Image
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_metric_learning import losses, miners
-from shared import GenericReIDModel, ReIDLightningModel
+from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
+from timm.data import resolve_data_config
 from torch.utils.data import DataLoader, Dataset, Subset
 
 # For faster learning
@@ -124,22 +125,25 @@ if __name__ == "__main__":
     )
     VAL_PERCENT = 0.1
 
+    # Get model supported resolution and compose transformations
+    data_config = resolve_data_config({}, model=MODEL_NAME)
+
+    input_size = data_config["input_size"][1:]
+    img_mean = data_config["mean"]
+    img_std = data_config["std"]
+
     # TODO: Do more research on transformations
     train_transform = T.Compose(
         [
-            T.Resize((256, 256)),
+            T.Resize(input_size),
             T.RandomHorizontalFlip(),
             T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            T.Normalize(mean=img_mean, std=img_std),
         ]
     )
 
-    validation_transform = T.Compose(
-        [
-            T.Resize((256, 256)),
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
+    validation_transform = get_testing_transformation(
+        input_size=input_size, img_mean=img_mean, img_std=img_std
     )
 
     train_subset_indices, val_subset_indices, train_label_map = get_veri_split(

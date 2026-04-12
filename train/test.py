@@ -7,7 +7,8 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 from PIL import Image
 from pytorch_metric_learning import losses, miners
-from shared import GenericReIDModel, ReIDLightningModel
+from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
+from timm.data import resolve_data_config
 from tqdm import tqdm
 from util import compute_reid_metrics
 
@@ -15,14 +16,6 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 TEST_DIR = "../datasets/VeRi/image_test/"
 QUERY_DIR = "../datasets/VeRi/image_query/"
-
-test_transform = T.Compose(
-    [
-        T.Resize((256, 256)),
-        T.ToTensor(),
-        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
-)
 
 
 def load_trained_model(path, model_name, num_of_classes):
@@ -47,7 +40,7 @@ def parse_filename(filename):
     return v_id, c_id
 
 
-def extract_features(directory_path, desc_name):
+def extract_features(directory_path, desc_name, test_transform):
     image_names = [f for f in os.listdir(directory_path) if f.endswith(".jpg")]
     features, v_ids, c_ids = [], [], []
 
@@ -102,10 +95,26 @@ if __name__ == "__main__":
     CHECKPOINT_PATH = sys.argv[1]
     MODEL_NAME = sys.argv[2]
     NUM_OF_CLASSES = int(sys.argv[3])
+
+    # Get model supported resolution and compose transformations
+    data_config = resolve_data_config({}, model=MODEL_NAME)
+
+    input_size = data_config["input_size"][1:]
+    img_mean = data_config["mean"]
+    img_std = data_config["std"]
+
+    test_transform = get_testing_transformation(
+        input_size=input_size, img_mean=img_mean, img_std=img_std
+    )
+
     model = load_trained_model(CHECKPOINT_PATH, MODEL_NAME, NUM_OF_CLASSES)
 
-    gallery_features, gallery_vids, gallery_cids = extract_features(TEST_DIR, "Gallery")
-    query_features, query_vids, query_cids = extract_features(QUERY_DIR, "Queries")
+    gallery_features, gallery_vids, gallery_cids = extract_features(
+        TEST_DIR, "Gallery", test_transform
+    )
+    query_features, query_vids, query_cids = extract_features(
+        QUERY_DIR, "Queries", test_transform
+    )
 
     mAP, cmc = evaluate_metrics(
         query_features,
