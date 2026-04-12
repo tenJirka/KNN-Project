@@ -190,7 +190,7 @@ if __name__ == "__main__":
     # Early stop - stop training if the model did not imporved for x time
     early_stop_callback = EarlyStopping(
         monitor="val_mAP",
-        min_delta=0.05,  # Limit what is called improvement
+        min_delta=0.005,  # Limit what is called improvement
         patience=3,  # If the model did not improve 3 times -> stop
         verbose=True,
         mode="max",
