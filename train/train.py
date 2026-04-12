@@ -1,16 +1,19 @@
 """Main training file"""
 
 import os
+import random
+import sys
 
 import pytorch_lightning as pl
 import torch
 import torchvision.transforms as T
 from PIL import Image
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_metric_learning import losses, miners
-from shared import GenericReIDModel, ReIDLightningModel
+from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
+from timm.data import resolve_data_config
 from torch.utils.data import DataLoader, Dataset, Subset
-import random
 
 # For faster learning
 torch.set_float32_matmul_precision("medium")
@@ -109,35 +112,45 @@ def get_veri_split(train_dataset: VeRiDataset, veri_percent=0.1, seed=42):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python train.py <checkpoints_path> <model_name>")
+        sys.exit(1)
+
+    CHECKPOINTS_PATH = sys.argv[1]
+    MODEL_NAME = sys.argv[2]
+
     # Number of ids in VeRi train dataset
     full_train_dataset = VeRiDataset(
         img_dir="../datasets/VeRi/image_train/", transform=None
     )
     VAL_PERCENT = 0.1
 
+    # Get model supported resolution and compose transformations
+    data_config = resolve_data_config({}, model=MODEL_NAME)
+
+    input_size = data_config["input_size"][1:]
+    img_mean = data_config["mean"]
+    img_std = data_config["std"]
+
     # TODO: Do more research on transformations
     train_transform = T.Compose(
         [
-            T.Resize((256, 256)),
+            T.Resize(input_size),
             T.RandomHorizontalFlip(),
             T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            T.Normalize(mean=img_mean, std=img_std),
         ]
     )
 
-    validation_transform = T.Compose(
-        [
-            T.Resize((256, 256)),
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
+    validation_transform = get_testing_transformation(
+        input_size=input_size, img_mean=img_mean, img_std=img_std
     )
 
     train_subset_indices, val_subset_indices, train_label_map = get_veri_split(
         full_train_dataset, veri_percent=VAL_PERCENT
     )
 
-    model = GenericReIDModel("resnet50")
+    model = GenericReIDModel(MODEL_NAME)
     train_dataset = VeRiDatasetSubset(
         whole_dataset=full_train_dataset,
         subset_indices=train_subset_indices,
@@ -165,28 +178,27 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=8)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=8)
 
-    # Checkpoint callback
-    # NOTE: Unsure about this change, so leaving it commented
-    # checkpoint_callback = ModelCheckpoint(
-    #     dirpath="checkpoints/",
-    #     filename="reid-{epoch:02d}-{train_loss:.2f}",
-    #     save_top_k=3,
-    #     monitor="train_loss",
-    #     mode="min",
-    # )
-
     # Instead of checkpointing based on less, checkpoint based on validation mAP
     checkpoint_callback = ModelCheckpoint(
-        dirpath="checkpoints/",
-        filename="reid-{epoch:02d}-{val_mAP:.4f}",
+        dirpath=CHECKPOINTS_PATH,
+        filename=f"reid-{MODEL_NAME}" + "-{epoch:02d}-{val_mAP:.4f}",
         save_top_k=3,
         monitor="val_mAP",
         mode="max",
     )
 
+    # Early stop - stop training if the model did not imporved for x time
+    early_stop_callback = EarlyStopping(
+        monitor="val_mAP",
+        min_delta=0.05,  # Limit what is called improvement
+        patience=3,  # If the model did not improve 3 times -> stop
+        verbose=True,
+        mode="max",
+    )
+
     trainer = pl.Trainer(
-        max_epochs=10,
-        callbacks=[checkpoint_callback],
+        max_epochs=100,
+        callbacks=[checkpoint_callback, early_stop_callback],
         accelerator="gpu",
         # precision="bf16-mixed",  # Not working as expected on my RX 9070 XT, disabling for now
     )

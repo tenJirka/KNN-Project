@@ -4,6 +4,7 @@ import pytorch_lightning as pl
 import timm
 import torch
 import torch.nn as nn
+import torchvision.transforms as T
 from util import compute_reid_metrics
 
 
@@ -99,3 +100,14 @@ class ReIDLightningModel(pl.LightningModule):
             ]
         )
         return optimizer
+
+
+def get_testing_transformation(input_size, img_mean, img_std):
+    """Prepared transformation for validation and testing"""
+    return T.Compose(
+        [
+            T.Resize(input_size),
+            T.ToTensor(),
+            T.Normalize(mean=img_mean, std=img_std),
+        ]
+    )
