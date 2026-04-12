@@ -4,6 +4,8 @@ import pytorch_lightning as pl
 import timm
 import torch
 import torch.nn as nn
+import torchvision.transforms as T
+from util import compute_reid_metrics
 
 
 class GenericReIDModel(nn.Module):
@@ -31,8 +33,10 @@ class ReIDLightningModel(pl.LightningModule):
         self.criterion_metric = criterion_metric
         self.miner = miner
 
+        self.validation_step_outputs = []
+
     def training_step(self, batch, batch_idx):
-        images, labels = batch
+        images, labels, cam_ids = batch
 
         features = self.model(images)
 
@@ -49,6 +53,43 @@ class ReIDLightningModel(pl.LightningModule):
 
         return loss
 
+    def validation_step(self, batch, batch_idx):
+        # batch should now return: images, labels (v_ids), and cam_ids
+        images, labels, cam_ids = batch
+
+        # Extract features (normalized for cosine similarity)
+        features = self.model(images)
+        features = torch.nn.functional.normalize(features, p=2, dim=1)
+
+        # Store results to compute metrics at the end of the epoch
+        self.validation_step_outputs.append(
+            {
+                "features": features.cpu(),
+                "labels": labels.cpu(),
+                "cam_ids": cam_ids.cpu(),
+            }
+        )
+
+    def on_validation_epoch_end(self):
+        # Concatenate all features, labels, and cam_ids from validation steps
+        features = torch.cat(
+            [x["features"] for x in self.validation_step_outputs], dim=0
+        )
+        labels = torch.cat([x["labels"] for x in self.validation_step_outputs], dim=0)
+        cam_ids = torch.cat([x["cam_ids"] for x in self.validation_step_outputs], dim=0)
+
+        self.validation_step_outputs.clear()
+
+        # Compute metrics (mAP, CMC) using the extracted features, labels, and cam_ids
+        mAP, cmc = compute_reid_metrics(
+            features, labels, cam_ids, features, labels, cam_ids, max_rank=1
+        )
+
+        rank1 = cmc[0] if len(cmc) > 0 else 0.0
+
+        self.log("val_mAP", mAP, prog_bar=True)
+        self.log("val_rank1", rank1, prog_bar=True)
+
     def configure_optimizers(self):
         # Use same optimizer for loss functions and model itself
         # TODO: Do more research on optimisers and learning rates
@@ -59,3 +100,14 @@ class ReIDLightningModel(pl.LightningModule):
             ]
         )
         return optimizer
+
+
+def get_testing_transformation(input_size, img_mean, img_std):
+    """Prepared transformation for validation and testing"""
+    return T.Compose(
+        [
+            T.Resize(input_size),
+            T.ToTensor(),
+            T.Normalize(mean=img_mean, std=img_std),
+        ]
+    )

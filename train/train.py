@@ -1,15 +1,19 @@
 """Main training file"""
 
 import os
+import random
+import sys
 
 import pytorch_lightning as pl
 import torch
 import torchvision.transforms as T
 from PIL import Image
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_metric_learning import losses, miners
-from shared import GenericReIDModel, ReIDLightningModel
-from torch.utils.data import DataLoader, Dataset
+from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
+from timm.data import resolve_data_config
+from torch.utils.data import DataLoader, Dataset, Subset
 
 # For faster learning
 torch.set_float32_matmul_precision("medium")
@@ -37,21 +41,130 @@ class VeRiDataset(Dataset):
         img_path = os.path.join(self.img_dir, img_name)
         image = Image.open(img_path).convert("RGB")
 
-        # Get ID and map them to the correct class
-        raw_id = int(img_name.split("_")[0])
+        parts = img_name.split("_")
+
+        # Get Vehicle ID and map it to the correct class label
+        raw_id = int(parts[0])
         label = self.id_to_class[raw_id]
+
+        # Get Camera ID (Strip the 'c' and convert to integer)
+        cam_id = int(parts[1].replace("c", ""))
 
         if self.transform:
             image = self.transform(image)
 
-        return image, label
+        return image, label, cam_id
+
+
+class VeRiDatasetSubset(Dataset):
+    """Helper class to apply transformations to a subset of the dataset"""
+
+    def __init__(self, whole_dataset, subset_indices, transform, label_map=None):
+        self.subset = Subset(whole_dataset, subset_indices)
+        self.transform = transform
+        self.label_map = label_map
+
+    def __len__(self):
+        return len(self.subset)
+
+    def __getitem__(self, idx):
+        image, label, cam_id = self.subset[idx]
+        if self.transform:
+            image = self.transform(image)
+
+        if self.label_map is not None:
+            label = self.label_map[label]
+
+        return image, label, cam_id
+
+
+def get_veri_split(train_dataset: VeRiDataset, veri_percent=0.1, seed=42):
+    """Helper function to get a random subset of the VeRi dataset for validation"""
+    all_indices = list(train_dataset.id_to_class.keys())
+    random.seed(seed)
+    random.shuffle(all_indices)
+
+    split_point = int(len(all_indices) * (1.0 - veri_percent))
+    train_ids = all_indices[:split_point]
+    val_ids = all_indices[split_point:]
+
+    train_indices = [
+        i
+        for i, img_name in enumerate(train_dataset.img_names)
+        if int(img_name.split("_")[0]) in train_ids
+    ]
+
+    val_indices = [
+        i
+        for i, img_name in enumerate(train_dataset.img_names)
+        if int(img_name.split("_")[0]) in val_ids
+    ]
+
+    # while id_to_class maps raw Vehicle IDs -> Global Class
+    # but because some Global Classes went to validation set, we need to remap to continuous mapping
+    # train_label_map maps Global Class from VeRiDataset -> Train Class (which accounts for the Classes that went to validation set)
+    train_label_map = {
+        train_dataset.id_to_class[raw_id]: i
+        for i, raw_id in enumerate(sorted(train_ids))
+    }
+
+    return train_indices, val_indices, train_label_map
 
 
 if __name__ == "__main__":
-    # Number of ids in VeRi train dataset
-    NUM_VERI_TRAIN_CLASSES = 576
+    if len(sys.argv) != 3:
+        print("Usage: python train.py <checkpoints_path> <model_name>")
+        sys.exit(1)
 
-    model = GenericReIDModel("resnet50")
+    CHECKPOINTS_PATH = sys.argv[1]
+    MODEL_NAME = sys.argv[2]
+
+    # Number of ids in VeRi train dataset
+    full_train_dataset = VeRiDataset(
+        img_dir="../datasets/VeRi/image_train/", transform=None
+    )
+    VAL_PERCENT = 0.1
+
+    # Get model supported resolution and compose transformations
+    data_config = resolve_data_config({}, model=MODEL_NAME)
+
+    input_size = data_config["input_size"][1:]
+    img_mean = data_config["mean"]
+    img_std = data_config["std"]
+
+    # TODO: Do more research on transformations
+    train_transform = T.Compose(
+        [
+            T.Resize(input_size),
+            T.RandomHorizontalFlip(),
+            T.ToTensor(),
+            T.Normalize(mean=img_mean, std=img_std),
+        ]
+    )
+
+    validation_transform = get_testing_transformation(
+        input_size=input_size, img_mean=img_mean, img_std=img_std
+    )
+
+    train_subset_indices, val_subset_indices, train_label_map = get_veri_split(
+        full_train_dataset, veri_percent=VAL_PERCENT
+    )
+
+    model = GenericReIDModel(MODEL_NAME)
+    train_dataset = VeRiDatasetSubset(
+        whole_dataset=full_train_dataset,
+        subset_indices=train_subset_indices,
+        transform=train_transform,
+        label_map=train_label_map,
+    )
+    val_dataset = VeRiDatasetSubset(
+        whole_dataset=full_train_dataset,
+        subset_indices=val_subset_indices,
+        transform=validation_transform,
+    )
+
+    NUM_VERI_TRAIN_CLASSES = len(train_label_map)
+    print(f"Number of classes in training set: {NUM_VERI_TRAIN_CLASSES}")
 
     # Create criterion metrics with number of classes matching number of ids in VeRi train set
     # Using [NormalizedSoftmaxLoss](https://kevinmusgrave.github.io/pytorch-metric-learning/losses/#normalizedsoftmaxloss)
@@ -61,38 +174,35 @@ if __name__ == "__main__":
 
     miner = miners.MultiSimilarityMiner()
 
-    # TODO: Do more research on transformations
-    transform = T.Compose(
-        [
-            T.Resize((256, 256)),
-            T.RandomHorizontalFlip(),
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
-
     # Load train split from VeRi dataset
-    train_dataset = VeRiDataset(
-        img_dir="../datasets/VeRi/image_train/", transform=transform
-    )
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=8)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=8)
 
-    # Checkpoint callback
+    # Instead of checkpointing based on less, checkpoint based on validation mAP
     checkpoint_callback = ModelCheckpoint(
-        dirpath="checkpoints/",
-        filename="reid-{epoch:02d}-{train_loss:.2f}",
+        dirpath=CHECKPOINTS_PATH,
+        filename=f"reid-{MODEL_NAME}" + "-{epoch:02d}-{val_mAP:.4f}",
         save_top_k=3,
-        monitor="train_loss",
-        mode="min",
+        monitor="val_mAP",
+        mode="max",
+    )
+
+    # Early stop - stop training if the model did not imporved for x time
+    early_stop_callback = EarlyStopping(
+        monitor="val_mAP",
+        min_delta=0.005,  # Limit what is called improvement
+        patience=3,  # If the model did not improve 3 times -> stop
+        verbose=True,
+        mode="max",
     )
 
     trainer = pl.Trainer(
-        max_epochs=10,
-        callbacks=[checkpoint_callback],
+        max_epochs=100,
+        callbacks=[checkpoint_callback, early_stop_callback],
         accelerator="gpu",
         # precision="bf16-mixed",  # Not working as expected on my RX 9070 XT, disabling for now
     )
 
     # Time to train!
     lightning_model = ReIDLightningModel(model, criterion_metric, miner)
-    trainer.fit(lightning_model, train_loader)
+    trainer.fit(lightning_model, train_loader, val_loader)

@@ -1,30 +1,22 @@
 import os
+import sys
 
+import numpy as np
 import torch
 import torch.nn.functional as F
-import torchvision.transforms as T
 from PIL import Image
 from pytorch_metric_learning import losses, miners
-from shared import GenericReIDModel, ReIDLightningModel
+from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
+from timm.data import resolve_data_config
 from tqdm import tqdm
+from util import compute_reid_metrics
 
-# All needed variable setup
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CHECKPOINT_PATH = "./checkpoints/reid-epoch=01-train_loss=3.26.ckpt"
+
 TEST_DIR = "../datasets/VeRi/image_test/"
-QUERY_IMAGE = "../datasets/VeRi/image_query/0027_c015_00011450_0.jpg"
-
-# Use normal transformation for testing
-test_transform = T.Compose(
-    [
-        T.Resize((256, 256)),
-        T.ToTensor(),
-        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
-)
+QUERY_DIR = "../datasets/VeRi/image_query/"
 
 
-# Load trained checkpoint
 def load_trained_model(path, model_name, num_of_classes):
     model = GenericReIDModel(model_name)
     criterion_metric = losses.NormalizedSoftmaxLoss(num_of_classes, model.feature_dim)
@@ -38,47 +30,102 @@ def load_trained_model(path, model_name, num_of_classes):
     return lightning_model
 
 
-model = load_trained_model(CHECKPOINT_PATH, "resnet50", 576)
+def parse_filename(filename):
+    # VeRi filename format: 0027_c015_00011450_0.jpg
+    # parts[0] = Vehicle ID (0027), parts[1] = Camera ID (c015)
+    parts = filename.split("_")
+    v_id = int(parts[0])
+    c_id = int(parts[1].replace("c", ""))
+    return v_id, c_id
 
-# Go thru test dir and extract vectors
-image_names = [f for f in os.listdir(TEST_DIR) if f.endswith(".jpg")]
-gallery_features = []
-gallery_names = []
 
-with torch.no_grad():
-    for name in tqdm(image_names):
-        img_path = os.path.join(TEST_DIR, name)
-        img = Image.open(img_path).convert("RGB")
-        tensor = test_transform(img).unsqueeze(0).to(DEVICE)
+def extract_features(directory_path, desc_name, test_transform):
+    image_names = [f for f in os.listdir(directory_path) if f.endswith(".jpg")]
+    features, v_ids, c_ids = [], [], []
 
-        feature = model.model(tensor)
-        # Normalizing vectors for cosine distance
-        feature = F.normalize(feature, p=2, dim=1)
+    with (
+        torch.no_grad() as _,
+        tqdm(image_names, desc=f"Extracting {desc_name}", leave=True) as pbar,
+    ):
+        for name in pbar:
+            img_path = os.path.join(directory_path, name)
+            img = Image.open(img_path).convert("RGB")
+            tensor = test_transform(img).unsqueeze(0).to(DEVICE)
 
-        gallery_features.append(feature)
-        gallery_names.append(name)
+            feature = model.model(tensor)
+            feature = F.normalize(feature, p=2, dim=1)
 
-# Join all vectors to one matrix
-gallery_features = torch.cat(gallery_features, dim=0)
+            features.append(feature.cpu())
 
-print(f"Looking for car: {QUERY_IMAGE}")
-query_img = Image.open(QUERY_IMAGE).convert("RGB")
-query_tensor = test_transform(query_img).unsqueeze(0).to(DEVICE)
+            vid, cid = parse_filename(name)
+            v_ids.append(vid)
+            c_ids.append(cid)
 
-with torch.no_grad():
-    query_feature = model.model(query_tensor)
-    query_feature = F.normalize(query_feature, p=2, dim=1)
+    return torch.cat(features, dim=0), np.array(v_ids), np.array(c_ids)
 
-# Matrix multiplication gives cosine distance, thanks to normalisation earlier
-similarities = torch.mm(query_feature, gallery_features.t()).squeeze(0)
 
-# Look for 10 most similiar vectors
-top_values, top_indices = torch.topk(similarities, k=10)
+def evaluate_metrics(
+    query_features,
+    query_vids,
+    query_cids,
+    gallery_features,
+    gallery_vids,
+    gallery_cids,
+    max_rank=50,
+):
+    return compute_reid_metrics(
+        query_features,
+        query_vids,
+        query_cids,
+        gallery_features,
+        gallery_vids,
+        gallery_cids,
+        max_rank,
+    )
 
-# Print closes vectors
-for i in range(0, 10):
-    idx = top_indices[i].item()
-    img_name = gallery_names[idx]
-    score = top_values[i].item()
 
-    print(f"Top {i}: {img_name} | Score = {score:.4f}")
+if __name__ == "__main__":
+    if len(sys.argv) != 4:
+        print(
+            "Usage: python test.py <model_checkpoint_path> <model_name> <num_of_classes>"
+        )
+        sys.exit(1)
+
+    CHECKPOINT_PATH = sys.argv[1]
+    MODEL_NAME = sys.argv[2]
+    NUM_OF_CLASSES = int(sys.argv[3])
+
+    # Get model supported resolution and compose transformations
+    data_config = resolve_data_config({}, model=MODEL_NAME)
+
+    input_size = data_config["input_size"][1:]
+    img_mean = data_config["mean"]
+    img_std = data_config["std"]
+
+    test_transform = get_testing_transformation(
+        input_size=input_size, img_mean=img_mean, img_std=img_std
+    )
+
+    model = load_trained_model(CHECKPOINT_PATH, MODEL_NAME, NUM_OF_CLASSES)
+
+    gallery_features, gallery_vids, gallery_cids = extract_features(
+        TEST_DIR, "Gallery", test_transform
+    )
+    query_features, query_vids, query_cids = extract_features(
+        QUERY_DIR, "Queries", test_transform
+    )
+
+    mAP, cmc = evaluate_metrics(
+        query_features,
+        query_vids,
+        query_cids,
+        gallery_features,
+        gallery_vids,
+        gallery_cids,
+    )
+
+    print("\n--- Final VeRi Benchmark Results ---")
+    print(f"mAP:    {mAP:.2%}")
+    print(f"Rank-1: {cmc[0]:.2%}")
+    print(f"Rank-5: {cmc[4]:.2%}")
+    print(f"Rank-10:{cmc[9]:.2%}")
