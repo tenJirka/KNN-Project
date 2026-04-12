@@ -9,6 +9,7 @@ import torch
 import torchvision.transforms as T
 from PIL import Image
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_metric_learning import losses, miners
 from shared import GenericReIDModel, ReIDLightningModel
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -182,9 +183,18 @@ if __name__ == "__main__":
         mode="max",
     )
 
+    # Early stop - stop training if the model did not imporved for x time
+    early_stop_callback = EarlyStopping(
+        monitor="val_mAP",
+        min_delta=0.05,  # Limit what is called improvement
+        patience=3,  # If the model did not improve 3 times -> stop
+        verbose=True,
+        mode="max",
+    )
+
     trainer = pl.Trainer(
         max_epochs=10,
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, early_stop_callback],
         accelerator="gpu",
         # precision="bf16-mixed",  # Not working as expected on my RX 9070 XT, disabling for now
     )
