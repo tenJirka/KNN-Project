@@ -5,6 +5,7 @@ import timm
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from util import compute_reid_metrics
 
 
@@ -91,15 +92,44 @@ class ReIDLightningModel(pl.LightningModule):
         self.log("val_rank1", rank1, prog_bar=True)
 
     def configure_optimizers(self):
-        # Use same optimizer for loss functions and model itself
-        # TODO: Do more research on optimisers and learning rates
-        optimizer = torch.optim.Adam(
+        # Select LR and optimizer
+        # TODO: More reasearch on this
+        optimizer = torch.optim.AdamW(
             [
-                {"params": self.model.parameters(), "lr": 0.0003},
-                {"params": self.criterion_metric.parameters(), "lr": 0.001},
-            ]
+                {"params": self.model.parameters(), "lr": 0.00005},
+                {"params": self.criterion_metric.parameters(), "lr": 0.0001},
+            ],
+            weight_decay=0.01,
         )
-        return optimizer
+
+        warmup_epochs = 10
+        total_epochs = 100  # Have to by same as in ./train.py
+
+        # Warm up -> From 0 to 100% during first 10 epochs
+        warmup_scheduler = LinearLR(
+            optimizer, start_factor=0.01, total_iters=warmup_epochs
+        )
+
+        # Main scheduler - will decrease LR as progressing thru epochs
+        main_scheduler = CosineAnnealingLR(
+            optimizer, T_max=(total_epochs - warmup_epochs)
+        )
+
+        # Use both schedulers
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, main_scheduler],
+            milestones=[warmup_epochs],
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",  # When run scheduler
+                "frequency": 1,
+            },
+        }
 
 
 def get_testing_transformation(input_size, img_mean, img_std):

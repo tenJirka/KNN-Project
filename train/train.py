@@ -11,6 +11,7 @@ from PIL import Image
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_metric_learning import losses, miners
+from pytorch_metric_learning.samplers import MPerClassSampler
 from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
 from timm.data import resolve_data_config
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -136,9 +137,18 @@ if __name__ == "__main__":
     train_transform = T.Compose(
         [
             T.Resize(input_size),
-            T.RandomHorizontalFlip(),
+            T.RandomHorizontalFlip(p=0.5),
+            # Random color change
+            T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
             T.ToTensor(),
             T.Normalize(mean=img_mean, std=img_std),
+            # Erase part of picture
+            T.RandomErasing(
+                p=0.5,  # Chance replacement will appear
+                scale=(0.02, 0.4),  # 2%-40% of image
+                ratio=(0.3, 3.3),
+                value="random",  # Fill with random...
+            ),
         ]
     )
 
@@ -174,9 +184,37 @@ if __name__ == "__main__":
 
     miner = miners.MultiSimilarityMiner()
 
-    # Load train split from VeRi dataset
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=8)
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=8)
+    batch_size = 200
+    loader_workers = 24
+
+    print("Extracting labels for MPerClassSampler...")
+    train_labels = []
+    for idx in train_subset_indices:
+        img_name = full_train_dataset.img_names[idx]
+        raw_id = int(img_name.split("_")[0])
+        global_label = full_train_dataset.id_to_class[raw_id]
+        mapped_label = train_label_map[global_label]
+        train_labels.append(mapped_label)
+
+    # m=4 means for every car include 4 images (50 different cars per batch for 200 batch size)
+    sampler = MPerClassSampler(
+        labels=train_labels,
+        m=4,
+        batch_size=batch_size,
+        length_before_new_iter=len(train_dataset),
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        shuffle=False,
+        num_workers=loader_workers,
+    )
+
+    val_loader = DataLoader(
+        val_dataset, batch_size=batch_size, shuffle=False, num_workers=loader_workers
+    )
 
     # Instead of checkpointing based on less, checkpoint based on validation mAP
     checkpoint_callback = ModelCheckpoint(
@@ -190,8 +228,8 @@ if __name__ == "__main__":
     # Early stop - stop training if the model did not imporved for x time
     early_stop_callback = EarlyStopping(
         monitor="val_mAP",
-        min_delta=0.005,  # Limit what is called improvement
-        patience=3,  # If the model did not improve 3 times -> stop
+        min_delta=0.003,  # Limit what is called improvement
+        patience=5,  # If the model did not improve 5 times -> stop
         verbose=True,
         mode="max",
     )
@@ -200,7 +238,8 @@ if __name__ == "__main__":
         max_epochs=100,
         callbacks=[checkpoint_callback, early_stop_callback],
         accelerator="gpu",
-        # precision="bf16-mixed",  # Not working as expected on my RX 9070 XT, disabling for now
+        precision="bf16-mixed",  # Not working with resnet
+        min_epochs=15,
     )
 
     # Time to train!
