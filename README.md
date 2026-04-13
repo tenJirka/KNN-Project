@@ -23,9 +23,15 @@ petry install
 
 Training scripts are in `train/`.
 
-Scripts are hard-coded for now. `python train.py` should train `resnet-50` on VeRi dataset on train set with 10 epochs.
+```bash
+Usage: python train.py <checkpoints_path> <model_name>
+```
 
-With `python test.py` you can try to search query in test set. All hard-coded for now. (It is in very early stage).
+Will train `model_name` on `VeRi` dataset for at least 15 epochs with `batch_size=200`.
+
+Then it will be stopped by early stopping based on `mAP`, `min_delta=0.003` and `patience=5`.
+
+Top 3 checkpoints will be saved to `checkpoints_path`.
 
 ## Datasets
 
