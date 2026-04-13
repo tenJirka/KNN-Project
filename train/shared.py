@@ -96,10 +96,10 @@ class ReIDLightningModel(pl.LightningModule):
         # TODO: More reasearch on this
         optimizer = torch.optim.AdamW(
             [
-                {"params": self.model.parameters(), "lr": 0.0005},
-                {"params": self.criterion_metric.parameters(), "lr": 0.001},
+                {"params": self.model.parameters(), "lr": 0.00005},
+                {"params": self.criterion_metric.parameters(), "lr": 0.0001},
             ],
-            weight_decay=1e-4,
+            weight_decay=0.01,
         )
 
         warmup_epochs = 10

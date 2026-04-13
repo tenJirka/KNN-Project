@@ -137,9 +137,18 @@ if __name__ == "__main__":
     train_transform = T.Compose(
         [
             T.Resize(input_size),
-            T.RandomHorizontalFlip(),
+            T.RandomHorizontalFlip(p=0.5),
+            # Random color change
+            T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
             T.ToTensor(),
             T.Normalize(mean=img_mean, std=img_std),
+            # Erase part of picture
+            T.RandomErasing(
+                p=0.5,  # Chance replacement will appear
+                scale=(0.02, 0.4),  # 2%-40% of image
+                ratio=(0.3, 3.3),
+                value="random",  # Fill with random...
+            ),
         ]
     )
 
