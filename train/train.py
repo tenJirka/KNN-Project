@@ -11,6 +11,7 @@ from PIL import Image
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_metric_learning import losses, miners
+from pytorch_metric_learning.samplers import MPerClassSampler
 from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
 from timm.data import resolve_data_config
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -174,12 +175,34 @@ if __name__ == "__main__":
 
     miner = miners.MultiSimilarityMiner()
 
-    # Load train split from VeRi dataset
     batch_size = 200
     loader_workers = 24
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=loader_workers
+
+    print("Extracting labels for MPerClassSampler...")
+    train_labels = []
+    for idx in train_subset_indices:
+        img_name = full_train_dataset.img_names[idx]
+        raw_id = int(img_name.split("_")[0])
+        global_label = full_train_dataset.id_to_class[raw_id]
+        mapped_label = train_label_map[global_label]
+        train_labels.append(mapped_label)
+
+    # m=4 means for every car include 4 images (50 different cars per batch for 200 batch size)
+    sampler = MPerClassSampler(
+        labels=train_labels,
+        m=4,
+        batch_size=batch_size,
+        length_before_new_iter=len(train_dataset),
     )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        shuffle=False,
+        num_workers=loader_workers,
+    )
+
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size, shuffle=False, num_workers=loader_workers
     )
