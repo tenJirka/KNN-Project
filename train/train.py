@@ -175,8 +175,14 @@ if __name__ == "__main__":
     miner = miners.MultiSimilarityMiner()
 
     # Load train split from VeRi dataset
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=8)
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=8)
+    batch_size = 200
+    loader_workers = 24
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=loader_workers
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=batch_size, shuffle=False, num_workers=loader_workers
+    )
 
     # Instead of checkpointing based on less, checkpoint based on validation mAP
     checkpoint_callback = ModelCheckpoint(
@@ -190,8 +196,8 @@ if __name__ == "__main__":
     # Early stop - stop training if the model did not imporved for x time
     early_stop_callback = EarlyStopping(
         monitor="val_mAP",
-        min_delta=0.005,  # Limit what is called improvement
-        patience=3,  # If the model did not improve 3 times -> stop
+        min_delta=0.003,  # Limit what is called improvement
+        patience=5,  # If the model did not improve 5 times -> stop
         verbose=True,
         mode="max",
     )
@@ -200,7 +206,8 @@ if __name__ == "__main__":
         max_epochs=100,
         callbacks=[checkpoint_callback, early_stop_callback],
         accelerator="gpu",
-        # precision="bf16-mixed",  # Not working as expected on my RX 9070 XT, disabling for now
+        precision="bf16-mixed",  # Not working with resnet
+        min_epochs=15,
     )
 
     # Time to train!
