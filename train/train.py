@@ -62,8 +62,7 @@ if __name__ == "__main__":
     CHECKPOINTS_PATH = sys.argv[1]
     MODEL_NAME = sys.argv[2]
 
-    # Number of ids in VeRi train dataset
-    full_train_dataset = VeRiDataset(
+    full_veri_train_dataset = VeRiDataset(
         img_dir="../datasets/VeRi/image_train/", transform=None
     )
     VAL_PERCENT = 0.1
@@ -99,16 +98,17 @@ if __name__ == "__main__":
     )
 
     train_subset_indices, val_subset_indices, train_label_map = get_veri_split(
-        full_train_dataset, veri_percent=VAL_PERCENT
+        full_veri_train_dataset, veri_percent=VAL_PERCENT
     )
 
+    # Number of ids in VeRi train dataset (subset)
     NUM_VERI_TRAIN_CLASSES = len(train_label_map)
     print(f"Number of classes in training set: {NUM_VERI_TRAIN_CLASSES}")
 
     model = GenericReIDModel(MODEL_NAME)
 
     veri_train_subset = VeRiDatasetSubset(
-        whole_dataset=full_train_dataset,
+        whole_dataset=full_veri_train_dataset,
         subset_indices=train_subset_indices,
         transform=train_transform,
         label_map=train_label_map,
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     train_dataset = ConcatDataset([veri_train_subset, pku_train_dataset])
 
     val_dataset = VeRiDatasetSubset(
-        whole_dataset=full_train_dataset,
+        whole_dataset=full_veri_train_dataset,
         subset_indices=val_subset_indices,
         transform=validation_transform,
     )
@@ -144,9 +144,9 @@ if __name__ == "__main__":
     print("Extracting labels for MPerClassSampler...")
     train_labels = []
     for idx in train_subset_indices:
-        img_name = full_train_dataset.img_names[idx]
+        img_name = full_veri_train_dataset.img_names[idx]
         raw_id = int(img_name.split("_")[0])
-        global_label = full_train_dataset.id_to_class[raw_id]
+        global_label = full_veri_train_dataset.id_to_class[raw_id]
         mapped_label = train_label_map[global_label]
         train_labels.append(mapped_label)
 
