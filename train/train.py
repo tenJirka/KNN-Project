@@ -113,6 +113,17 @@ if __name__ == "__main__":
         transform=train_transform,
         label_map=train_label_map,
     )
+
+    # create the PKU dataset, but start labeling from NUM_VERI_TRAIN_CLASSES, so that PKU labels do not overlap with VeRi labels
+    pku_train_dataset = PKUVehicleIdDataset(
+        img_dir="../datasets/VehicleID_V1.0/image/",
+        train_list_txt="../datasets/VehicleID_V1.0/train_test_split/train_list.txt",
+        transform=train_transform,
+        label_offset=NUM_VERI_TRAIN_CLASSES,  # PKU labels start after VeRi labels
+    )
+
+    train_dataset = ConcatDataset([veri_train_subset, pku_train_dataset])
+
     val_dataset = VeRiDatasetSubset(
         whole_dataset=full_train_dataset,
         subset_indices=val_subset_indices,
