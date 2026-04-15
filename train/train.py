@@ -15,7 +15,7 @@ from pytorch_metric_learning import losses, miners
 from pytorch_metric_learning.samplers import MPerClassSampler
 from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
 from timm.data import resolve_data_config
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import ConcatDataset, DataLoader
 
 # For faster learning
 torch.set_float32_matmul_precision("medium")
@@ -67,8 +67,10 @@ if __name__ == "__main__":
     )
     VAL_PERCENT = 0.1
 
+    model = GenericReIDModel(MODEL_NAME)
+
     # Get model supported resolution and compose transformations
-    data_config = resolve_data_config({}, model=MODEL_NAME)
+    data_config = resolve_data_config({}, model=model.backbone)
 
     input_size = data_config["input_size"][1:]
     img_mean = data_config["mean"]
@@ -105,8 +107,6 @@ if __name__ == "__main__":
     NUM_VERI_TRAIN_CLASSES = len(train_label_map)
     print(f"Number of classes in training set: {NUM_VERI_TRAIN_CLASSES}")
 
-    model = GenericReIDModel(MODEL_NAME)
-
     veri_train_subset = VeRiDatasetSubset(
         whole_dataset=full_veri_train_dataset,
         subset_indices=train_subset_indices,
@@ -138,7 +138,7 @@ if __name__ == "__main__":
 
     miner = miners.MultiSimilarityMiner()
 
-    batch_size = 200
+    batch_size = 64
     loader_workers = 24
 
     print("Extracting labels for MPerClassSampler...")
