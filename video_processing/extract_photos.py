@@ -1,10 +1,12 @@
-import cv2
-import os
 import math
+import os
+
+import cv2
 from ultralytics import YOLO
 
 INPUT_VIDEO_PATH = "videa_fit/20240424_13.mp4"
 OUTPUT_DIR = "photos_from_20240424_13"
+
 
 def extract_dataset(video_path, output_dir):
     """Extracts photos of moving cars from the video and saves them in the output directory"""
@@ -12,9 +14,9 @@ def extract_dataset(video_path, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    model = YOLO("yolov8n.pt") #TODO: maybe change the model, works fine for now
+    model = YOLO("yolov8n.pt")  # TODO: maybe change the model, works fine for now
     capture = cv2.VideoCapture(video_path)
-    
+
     if not capture.isOpened():
         print("ERROR: Video not loaded")
         return
@@ -22,7 +24,7 @@ def extract_dataset(video_path, output_dir):
     track_history = {}
     frames_saved = {}
     moving_cars_stats = set()
-    
+
     unconfirmed_crops = {}
 
     history_length = 10
@@ -39,10 +41,8 @@ def extract_dataset(video_path, output_dir):
             filename = os.path.join(car_dir, f"{frame_count:04d}.jpg")
             cv2.imwrite(filename, crop_img)
 
-
-
     while capture.isOpened():
-        #we go through the video fram by frame, detecting cars and tracking
+        # we go through the video fram by frame, detecting cars and tracking
         success, frame = capture.read()
         if not success:
             break
@@ -50,33 +50,33 @@ def extract_dataset(video_path, output_dir):
         results = model.track(frame, classes=[2], persist=True, verbose=False)
 
         if results[0].boxes.id is not None:
-            #we get the bounding boxes and track ids for the cars
+            # we get the bounding boxes and track ids for the cars
             boxes = results[0].boxes.xyxy.cpu().numpy()
             track_ids = results[0].boxes.id.int().cpu().tolist()
 
-            #for each car
+            # for each car
             for box, track_id in zip(boxes, track_ids):
                 x1, y1, x2, y2 = map(int, box)
                 cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                
-                car_crop = frame[y1:y2, x1:x2] 
-                
+
+                car_crop = frame[y1:y2, x1:x2]
+
                 if track_id not in track_history:
                     track_history[track_id] = []
-                
+
                 track_history[track_id].append((cx, cy))
                 if len(track_history[track_id]) > history_length:
                     track_history[track_id].pop(0)
 
-                #we need to determine if car is moving to disqualify parked cars
+                # we need to determine if car is moving to disqualify parked cars
                 moving = False
-                
-                #check the distance if track history is long enough
+
+                # check the distance if track history is long enough
                 if len(track_history[track_id]) == history_length:
                     old_x, old_y = track_history[track_id][0]
                     distance = math.hypot(cx - old_x, cy - old_y)
-                    
-                    if distance > movement_threshold: 
+
+                    if distance > movement_threshold:
                         moving = True
                         moving_cars_stats.add(track_id)
 
@@ -84,24 +84,28 @@ def extract_dataset(video_path, output_dir):
                     frames_saved[track_id] = 0
 
                 if moving:
-                    #the car started to move buffer of crops is moved to the output
-                    if track_id in unconfirmed_crops and len(unconfirmed_crops[track_id]) > 0:
+                    # the car started to move buffer of crops is moved to the output
+                    if (
+                        track_id in unconfirmed_crops
+                        and len(unconfirmed_crops[track_id]) > 0
+                    ):
                         for buffered_crop in unconfirmed_crops[track_id]:
-
-                            save_car_image(buffered_crop, track_id, frames_saved[track_id])
+                            save_car_image(
+                                buffered_crop, track_id, frames_saved[track_id]
+                            )
                             frames_saved[track_id] += 1
-                        
-                        unconfirmed_crops[track_id].clear() 
-                    
-                    #current crop is saved
+
+                        unconfirmed_crops[track_id].clear()
+
+                    # current crop is saved
                     save_car_image(car_crop, track_id, frames_saved[track_id])
                     frames_saved[track_id] += 1
 
                 else:
-                    #if the car is not moving we buffer in case it starts moving later
+                    # if the car is not moving we buffer in case it starts moving later
                     if track_id not in unconfirmed_crops:
                         unconfirmed_crops[track_id] = []
-                    
+
                     unconfirmed_crops[track_id].append(car_crop)
 
                     if len(unconfirmed_crops[track_id]) > history_length:
@@ -110,5 +114,7 @@ def extract_dataset(video_path, output_dir):
     capture.release()
     print(f"Byla zachycena data pro {len(moving_cars_stats)} unikátních jedoucích aut.")
 
+
 if __name__ == "__main__":
     extract_dataset(INPUT_VIDEO_PATH, OUTPUT_DIR)
+
