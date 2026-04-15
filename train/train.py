@@ -1,6 +1,5 @@
 """Main training file"""
 
-import os
 import random
 import sys
 
@@ -8,7 +7,6 @@ import pytorch_lightning as pl
 import torch
 import torchvision.transforms as T
 from dataset import PKUVehicleIdDataset, VeRiDataset, VeRiDatasetSubset
-from PIL import Image
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_metric_learning import losses, miners
