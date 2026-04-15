@@ -95,8 +95,10 @@ if __name__ == "__main__":
     MODEL_NAME = sys.argv[2]
     NUM_OF_CLASSES = int(sys.argv[3])
 
+    model = GenericReIDModel(MODEL_NAME)
+
     # Get model supported resolution and compose transformations
-    data_config = resolve_data_config({}, model=MODEL_NAME)
+    data_config = resolve_data_config({}, model=model.backbone)
 
     input_size = data_config["input_size"][1:]
     img_mean = data_config["mean"]
@@ -105,7 +107,6 @@ if __name__ == "__main__":
     test_transform = get_testing_transformation(
         input_size=input_size, img_mean=img_mean, img_std=img_std
     )
-
     model = load_trained_model(CHECKPOINT_PATH, MODEL_NAME, NUM_OF_CLASSES)
 
     gallery_features, gallery_vids, gallery_cids = extract_features(
