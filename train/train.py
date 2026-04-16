@@ -171,7 +171,9 @@ if __name__ == "__main__":
     # Instead of checkpointing based on less, checkpoint based on validation mAP
     checkpoint_callback = ModelCheckpoint(
         dirpath=CHECKPOINTS_PATH,
-        filename=f"reid-{MODEL_NAME}" + "-{epoch:02d}-{val_mAP:.4f}",
+        filename=f"reid-{MODEL_NAME}"
+        + "-c={NUM_VERI_TRAIN_CLASSES}"
+        + "-{epoch:02d}-{val_mAP:.4f}",
         save_top_k=3,
         monitor="val_mAP",
         mode="max",
