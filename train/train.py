@@ -121,6 +121,7 @@ if __name__ == "__main__":
     )
 
     NUM_PKU_TRAIN_CLASSES = len(pku_train_dataset.id_to_class)
+    print(f"Number of classes in PKU dataset: {NUM_PKU_TRAIN_CLASSES}")
 
     train_dataset = ConcatDataset([veri_train_subset, pku_train_dataset])
 
