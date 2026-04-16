@@ -120,7 +120,12 @@ if __name__ == "__main__":
         label_offset=NUM_VERI_TRAIN_CLASSES,  # PKU labels start after VeRi labels
     )
 
+    NUM_PKU_TRAIN_CLASSES = len(pku_train_dataset.id_to_class)
+
     train_dataset = ConcatDataset([veri_train_subset, pku_train_dataset])
+
+    NUM_CLASSES = NUM_VERI_TRAIN_CLASSES + NUM_PKU_TRAIN_CLASSES
+    print(f"Total number of classes (VeRi + PKU): {NUM_CLASSES}")
 
     val_dataset = VeRiDatasetSubset(
         whole_dataset=full_veri_train_dataset,
@@ -131,7 +136,7 @@ if __name__ == "__main__":
     # Create criterion metrics with number of classes matching number of ids in VeRi train set
     # Using [NormalizedSoftmaxLoss](https://kevinmusgrave.github.io/pytorch-metric-learning/losses/#normalizedsoftmaxloss)
     criterion_metric = losses.NormalizedSoftmaxLoss(
-        num_classes=NUM_VERI_TRAIN_CLASSES, embedding_size=model.feature_dim
+        num_classes=NUM_CLASSES, embedding_size=model.feature_dim
     )
 
     miner = miners.MultiSimilarityMiner()
@@ -172,7 +177,7 @@ if __name__ == "__main__":
     checkpoint_callback = ModelCheckpoint(
         dirpath=CHECKPOINTS_PATH,
         filename=f"reid-{MODEL_NAME}"
-        + "-c={NUM_VERI_TRAIN_CLASSES}"
+        + "-c={NUM_CLASSES}"
         + "-{epoch:02d}-{val_mAP:.4f}",
         save_top_k=3,
         monitor="val_mAP",
