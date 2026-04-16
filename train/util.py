@@ -1,18 +1,9 @@
-import numpy as np
+import torchreid
 import torch
+import numpy as np
 
 
-def compute_average_precision(sorted_matches):
-    num_rel = sorted_matches.sum()
-    if num_rel == 0:
-        return 0.0
-
-    tmp_cmc = sorted_matches.cumsum()
-    precision_at_k = tmp_cmc / (np.arange(len(sorted_matches)) + 1)
-    ap = (precision_at_k * sorted_matches).sum() / num_rel
-    return ap
-
-
+# Calculates mAP and CMC
 def compute_reid_metrics(
     query_features,
     query_vids,
@@ -39,53 +30,20 @@ def compute_reid_metrics(
     if not isinstance(gallery_features, torch.Tensor):
         gallery_features = torch.tensor(gallery_features)
 
-    # Calculate cosine similarity using matrix multiplication
+    # Compute cosine similarity
     similarities = torch.mm(query_features, gallery_features.t()).cpu().numpy()
 
-    num_q, num_g = similarities.shape
+    # Convert cosine similarity to cosine distance
+    distmat = 1.0 - similarities
 
-    # Sort gallery items by highest similarity (descending order)
-    indices = np.argsort(-similarities, axis=1)
+    # Torchreid handles sorting, junk removal, CMC, and mAP calculation
+    cmc, mAP = torchreid.metrics.rank.evaluate_rank(
+        distmat=distmat,
+        q_pids=query_vids,
+        q_camids=query_cids,
+        g_pids=gallery_vids,
+        g_camids=gallery_cids,
+        max_rank=max_rank,
+    )
 
-    # Create a boolean matrix of matches (Query ID == Gallery ID)
-    matches = (gallery_vids[indices] == query_vids[:, np.newaxis]).astype(np.int32)
-
-    all_ap = []
-    all_cmc = []
-
-    for q_idx in range(num_q):
-        q_vid = query_vids[q_idx]
-        q_cid = query_cids[q_idx]
-        order = indices[q_idx]
-
-        # Remove gallery samples that have the same Vehicle ID and Camera ID as the query (junk images)
-        remove_junk = (gallery_vids[order] == q_vid) & (gallery_cids[order] == q_cid)
-        keep = ~remove_junk
-
-        # Filter the matches list to drop the junk images
-        raw_cmc = matches[q_idx][keep]
-
-        # If there are no valid cross-camera gallery matches for this query, ignore it
-        if not np.any(raw_cmc):
-            continue
-
-        # Compute CMC (Cumulative Matching Characteristics)
-        cmc = raw_cmc.cumsum()
-        cmc[cmc > 1] = (
-            1  # We only care if we found the correct car AT LEAST once by rank K
-        )
-        all_cmc.append(cmc[:max_rank])
-
-        # Compute Average Precision (AP) for this query
-        all_ap.append(compute_average_precision(raw_cmc))
-
-    all_cmc = np.asarray(all_cmc).astype(np.float32)
-
-    if len(all_ap) > 0:
-        mean_cmc = all_cmc.sum(0) / len(all_ap)
-        mAP = np.mean(all_ap)
-    else:
-        mean_cmc = np.zeros(max_rank)
-        mAP = 0.0
-
-    return mAP, np.atleast_1d(mean_cmc)
+    return mAP, cmc
