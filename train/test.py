@@ -84,16 +84,36 @@ def evaluate_metrics(
     )
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print(
-            "Usage: python test.py <model_checkpoint_path> <model_name> <num_of_classes>"
+def parse_checkpoint_filename(filename):
+    # Expected format: reid-<model_name>-c=<num_classes>-epoch=<epoch_value>-val_mAP=<mAP_value>.ckpt
+    parts = filename.split("-")
+    if (
+        len(parts) != 5
+        or not parts[0].startswith("reid")
+        or not parts[2].startswith("c=")
+    ):
+        raise ValueError(
+            f"Unexpected checkpoint filename format: {filename}. \nExpected format: reid-<model_name>-c=<num_classes>-epoch=<epoch_value>-val_mAP=<mAP_value>.ckpt"
         )
+    model_name = parts[1]
+    num_classes = int(parts[2][2:])  # Remove 'c=' prefix
+    epoch_part = parts[3]
+    mAP_part = parts[4]
+
+    epoch_value = int(epoch_part.split("=")[1])
+    mAP_value = float(mAP_part.split("=")[1].replace(".ckpt", ""))
+    return model_name, num_classes, epoch_value, mAP_value
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python test.py <model_checkpoint_path>")
         sys.exit(1)
 
     CHECKPOINT_PATH = sys.argv[1]
-    MODEL_NAME = sys.argv[2]
-    NUM_OF_CLASSES = int(sys.argv[3])
+    MODEL_NAME, NUM_OF_CLASSES, _, _ = parse_checkpoint_filename(
+        os.path.basename(CHECKPOINT_PATH)
+    )
 
     model = GenericReIDModel(MODEL_NAME)
 
