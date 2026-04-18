@@ -141,3 +141,17 @@ def get_testing_transformation(input_size, img_mean, img_std):
             T.Normalize(mean=img_mean, std=img_std),
         ]
     )
+
+
+def determine_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        import os
+
+        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = (
+            "1"  # Enable fallback to CPU for unsupported operations
+        )
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
