@@ -6,13 +6,18 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from pytorch_metric_learning import losses, miners
-from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
+from shared import (
+    GenericReIDModel,
+    ReIDLightningModel,
+    get_testing_transformation,
+    determine_device,
+)
 from timm.data import resolve_data_config
 from tqdm import tqdm
 from util import compute_reid_metrics
 from dataset import ReIDTestDataset
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = determine_device()
 
 TEST_DIR = "../datasets/VeRi/image_test/"
 QUERY_DIR = "../datasets/VeRi/image_query/"
