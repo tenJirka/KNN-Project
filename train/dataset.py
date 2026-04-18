@@ -119,3 +119,30 @@ class VeRiDatasetSubset(Dataset):
             label = self.label_map[label]
 
         return image, label, cam_id
+
+
+###################### Generic ReID Test Dataset ##################
+class ReIDTestDataset(Dataset):
+    """Class to load images from a directory for feature extraction during testing."""
+
+    def __init__(self, directory_path, parse_filename, transform):
+        self.directory_path = directory_path
+        self.image_names = [f for f in os.listdir(directory_path) if f.endswith(".jpg")]
+        self.transform = transform
+        self.parse_filename = parse_filename
+
+    def __len__(self):
+        return len(self.image_names)
+
+    def __getitem__(self, idx):
+        name = self.image_names[idx]
+        img_path = os.path.join(self.directory_path, name)
+
+        # Load and transform image
+        img = Image.open(img_path).convert("RGB")
+        tensor = self.transform(img)
+
+        # Parse IDs
+        vid, cid = self.parse_filename(name)
+
+        return tensor, vid, cid
