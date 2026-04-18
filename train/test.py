@@ -10,6 +10,7 @@ from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformat
 from timm.data import resolve_data_config
 from tqdm import tqdm
 from util import compute_reid_metrics
+from dataset import ReIDTestDataset
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -39,27 +40,27 @@ def parse_filename(filename):
     return v_id, c_id
 
 
-def extract_features(directory_path, desc_name, test_transform):
-    image_names = [f for f in os.listdir(directory_path) if f.endswith(".jpg")]
+def extract_features(
+    directory_path, desc_name, test_transform, batch_size=64, workers=4
+):
+    dataset = ReIDTestDataset(directory_path, parse_filename, test_transform)
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, num_workers=workers
+    )
+
     features, v_ids, c_ids = [], [], []
 
-    with (
-        torch.no_grad() as _,
-        tqdm(image_names, desc=f"Extracting {desc_name}", leave=True) as pbar,
-    ):
-        for name in pbar:
-            img_path = os.path.join(directory_path, name)
-            img = Image.open(img_path).convert("RGB")
-            tensor = test_transform(img).unsqueeze(0).to(DEVICE)
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc=f"Extracting {desc_name}", leave=True):
+            images, vids_batch, cids_batch = batch
+            images = images.to(DEVICE, non_blocking=True)
 
-            feature = model.model(tensor)
-            feature = F.normalize(feature, p=2, dim=1)
+            batch_features = model.model(images)
+            batch_features = F.normalize(batch_features, p=2, dim=1)
 
-            features.append(feature.cpu())
-
-            vid, cid = parse_filename(name)
-            v_ids.append(vid)
-            c_ids.append(cid)
+            features.append(batch_features.cpu())
+            v_ids.extend(vids_batch.numpy())
+            c_ids.extend(cids_batch.numpy())
 
     return torch.cat(features, dim=0), np.array(v_ids), np.array(c_ids)
 
