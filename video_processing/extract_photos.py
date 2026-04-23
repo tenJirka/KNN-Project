@@ -4,8 +4,9 @@ import os
 import cv2
 from ultralytics import YOLO
 
-INPUT_VIDEO_PATH = "videa_fit/20240424_13.mp4"
-OUTPUT_DIR = "photos_from_20240424_13"
+INPUT_VIDEOS_FOLDER = "videa_fit"
+OUTPUT_BASE_DIR = "extracted_photos"
+PROGRESS_FILE = "extraction_progress.txt"
 
 
 def extract_dataset(video_path, output_dir):
@@ -116,5 +117,28 @@ def extract_dataset(video_path, output_dir):
 
 
 if __name__ == "__main__":
-    extract_dataset(INPUT_VIDEO_PATH, OUTPUT_DIR)
+    if not os.path.exists(INPUT_VIDEOS_FOLDER):
+        print(f"ERROR: Input folder {INPUT_VIDEOS_FOLDER} not found")
 
+    processed_videos = set()
+    if os.path.exists(PROGRESS_FILE):
+        with open(PROGRESS_FILE, "r") as f:
+            processed_videos = set(f.read().splitlines())
+
+    for video_filename in sorted(os.listdir(INPUT_VIDEOS_FOLDER)):
+        if video_filename in processed_videos:
+            continue
+
+        video_path = os.path.join(INPUT_VIDEOS_FOLDER, video_filename)
+        
+        if not os.path.isfile(video_path):
+            continue
+
+        video_name_without_ext = os.path.splitext(video_filename)[0]
+        output_dir = os.path.join(OUTPUT_BASE_DIR, f"photos_from_{video_name_without_ext}")
+
+        print(f"Processing video: {video_filename}")
+        extract_dataset(video_path, output_dir)
+
+        with open(PROGRESS_FILE, "a") as f:
+            f.write(video_filename + "\n")
