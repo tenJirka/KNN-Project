@@ -7,9 +7,10 @@ import shutil
 import requests
 from PIL import Image
 
-INPUT_DIR = "photos_from_20240424_2"
-OUTPUT_DIR = "labeled_fit_photos"
+INPUT_BASE_DIR = "extracted_photos"
+OUTPUT_DIR = "labeled_photos"
 API_URL = "http://localhost:1234/v1/chat/completions"
+PROGRESS_FILE = "progress_labeling.txt"
 
 PROMPT = """your job is to detect whats on the registration plate of the vehicle in photos
 your input: photos
@@ -194,18 +195,39 @@ def save_to_output(plate, source_folder):
 
 
 def main():
-    """Its expected that in the INPUT_DIR there are folders with photos of individual vehicles
+    """Its expected that in the INPUT_DIR there are folders with photos of individual vehicles 
     the name of the folder is not important, but all photos in one folder should be of the same vehicle"""
 
-    if not os.path.exists(INPUT_DIR):
+    if not os.path.exists(INPUT_BASE_DIR):
+        print(f"ERRROR: Input folder {INPUT_BASE_DIR} not found")
         return
 
-    for item in os.listdir(INPUT_DIR):
-        item_path = os.path.join(INPUT_DIR, item)
-        if os.path.isdir(item_path):
-            process_vehicle_folder(item_path)
+    processed_vehicles = set()
+    if os.path.exists(PROGRESS_FILE):
+        with open(PROGRESS_FILE, "r") as f:
+            processed_vehicles = set(f.read().splitlines())
 
+    for session_folder in sorted(os.listdir(INPUT_BASE_DIR)):
+        session_path = os.path.join(INPUT_BASE_DIR, session_folder)
+        
+        if not os.path.isdir(session_path):
+            continue
+            
+        for vehicle_folder in sorted(os.listdir(session_path)):
+            vehicle_path = os.path.join(session_path, vehicle_folder)
+            
+            if not os.path.isdir(vehicle_path):
+                continue
+
+            checkpoint_key = f"{session_folder}/{vehicle_folder}"
+
+            if checkpoint_key in processed_vehicles:
+                continue
+
+            process_vehicle_folder(vehicle_path)
+
+            with open(PROGRESS_FILE, "a") as f:
+                f.write(checkpoint_key + "\n")
 
 if __name__ == "__main__":
     main()
-
