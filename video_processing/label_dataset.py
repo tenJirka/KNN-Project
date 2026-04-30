@@ -3,12 +3,9 @@ import glob
 import os
 import re
 import shutil
-
 import requests
 from PIL import Image
 
-INPUT_DIR = "photos_from_20240424_2"
-OUTPUT_DIR = "labeled_fit_photos"
 API_URL = "http://localhost:1234/v1/chat/completions"
 
 PROMPT = """your job is to detect whats on the registration plate of the vehicle in photos
@@ -23,9 +20,7 @@ examples of return values (either - or seven characters with second character be
 [BZB9828]
 [-]"""
 
-
 def get_image_resolution(image_path):
-    """Returns the resoultion of an image"""
     try:
         with Image.open(image_path) as img:
             return img.width * img.height
@@ -33,15 +28,11 @@ def get_image_resolution(image_path):
         print(f"ERROR opening {image_path}: {e}")
         return 0
 
-
 def encode_image_to_base64(image_path):
-    """Reads an image and encodes to base64 (for the API)"""
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
-
 def get_top_4_images(folder_path):
-    """Returns 4 images from a folder that have the highest resolution"""
     extensions = ("*.png", "*.jpg", "*.jpeg", "*.webp")
     image_files = []
 
@@ -57,20 +48,13 @@ def get_top_4_images(folder_path):
     image_files.sort(key=get_image_resolution, reverse=True)
     return image_files[:4]
 
-
 def postproces_plate(plate):
-    """Fixes model failures to correctly read license plates"""
     plate = plate.upper()
-
-    # 2: its not possible to have O or Q so we change them to 0
     plate = plate.replace("O", "0").replace("Q", "0")
 
-    # 1: second character is a letter
-    # TODO: maybe this is too harsh and custom plates could have a number, idk
     if len(plate) >= 2:
         plate_list = list(plate)
         second_place = plate_list[1]
-
         fixes = {
             "8": "B",
             "5": "S",
@@ -94,80 +78,15 @@ def postproces_plate(plate):
 
     return plate
 
+def save_to_output(plate, source_folder, output_dir):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-def process_vehicle_folder(folder_path):
-    """Processes a folder with photos of a single vehicle, sends them to the API and saves the answer"""
-    """It calls the API of basic setup of ML Studio with local model"""
-    """The local model used now is 'gemma-4-e4b-it@q8_0'"""
-
-    folder_name = os.path.basename(folder_path)
-    images_for_api = get_top_4_images(folder_path)
-
-    if not images_for_api:
-        # print(f"Skipping vehicle in folder '{folder_name}'")
-        return
-
-    print(f"Evaluating car in folder '{folder_name}'")
-
-    content = [{"type": "text", "text": PROMPT}]
-
-    for img_path in images_for_api:
-        base64_img = encode_image_to_base64(img_path)
-        ext = img_path.split(".")[-1].lower()
-        mime_type = f"image/{ext if ext != 'jpg' else 'jpeg'}"
-
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime_type};base64,{base64_img}"},
-            }
-        )
-
-    payload = {
-        "model": "local-model",
-        "messages": [{"role": "user", "content": content}],
-        "temperature": 0.0,  # 0 for deterministic output
-        "max_tokens": 20,
-    }
-
-    try:
-        response = requests.post(API_URL, json=payload)
-        response.raise_for_status()
-        data = response.json()
-
-        # postprocess the answer
-        reply = data["choices"][0]["message"]["content"].strip()
-        match = re.search(r"\[(.*?)\]", reply)  # TODO possible performance issue
-
-        if match:
-            raw_result = match.group(1).strip()
-
-            if raw_result == "-":
-                print(f"PLATE NOT RECOGNIZED (for car in folder '{folder_name}')")
-            else:
-                # call the postprocessing
-                clean_result = postproces_plate(raw_result)
-
-                print(f"FOUND: {clean_result}")
-
-                save_to_output(clean_result, folder_path)
-        else:
-            print(f"INVALID MODEL ANSWER: {reply}")
-
-    except Exception as e:
-        print(f"ERROR: while processing car in folder '{folder_name}': {e}")
-
-
-def save_to_output(plate, source_folder):
-    """Copies the photos of a vehicle from its folder and appends them to the folder with the same plate"""
-
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-
-    target_folder = os.path.join(OUTPUT_DIR, plate)
+    target_folder = os.path.join(output_dir, plate)
 
     if os.path.exists(target_folder):
-        print(f"------------  Identic vehicle found (plate: {plate}) ------------")
+        #print(f"------------  Identic vehicle found (plate: {plate}) ------------")
+        pass
     else:
         os.makedirs(target_folder)
 
@@ -190,22 +109,56 @@ def save_to_output(plate, source_folder):
 
         shutil.copy2(img_path, target_path)
 
-    print(f"Copied {len(all_images)} images to '{target_folder}'")
+    #print(f"Copied {len(all_images)} images to '{target_folder}'")
 
+def process_vehicle_folder(folder_path, output_dir):
+    """Processes a single vehicle folder, sends to API, and saves the answer."""
+    folder_name = os.path.basename(folder_path)
+    images_for_api = get_top_4_images(folder_path)
 
-def main():
-    """Its expected that in the INPUT_DIR there are folders with photos of individual vehicles
-    the name of the folder is not important, but all photos in one folder should be of the same vehicle"""
-
-    if not os.path.exists(INPUT_DIR):
+    if not images_for_api:
         return
 
-    for item in os.listdir(INPUT_DIR):
-        item_path = os.path.join(INPUT_DIR, item)
-        if os.path.isdir(item_path):
-            process_vehicle_folder(item_path)
+    print(f"Evaluating car in folder '{folder_name}'")
 
+    content = [{"type": "text", "text": PROMPT}]
 
-if __name__ == "__main__":
-    main()
+    for img_path in images_for_api:
+        base64_img = encode_image_to_base64(img_path)
+        ext = img_path.split(".")[-1].lower()
+        mime_type = f"image/{ext if ext != 'jpg' else 'jpeg'}"
 
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{base64_img}"},
+        })
+
+    payload = {
+        "model": "local-model",
+        "messages": [{"role": "user", "content": content}],
+        "temperature": 0.0,
+        "max_tokens": 20,
+    }
+
+    try:
+        response = requests.post(API_URL, json=payload)
+        response.raise_for_status()
+        data = response.json()
+
+        reply = data["choices"][0]["message"]["content"].strip()
+        match = re.search(r"\[(.*?)\]", reply)
+
+        if match:
+            raw_result = match.group(1).strip()
+            if raw_result == "-":
+                #print(f"PLATE NOT RECOGNIZED (for car in folder '{folder_name}')")
+                pass
+            else:
+                clean_result = postproces_plate(raw_result)
+                #print(f"FOUND: {clean_result}")
+                save_to_output(clean_result, folder_path, output_dir)
+        else:
+            print(f"INVALID MODEL ANSWER: {reply}")
+
+    except Exception as e:
+        print(f"ERROR: while processing car in folder '{folder_name}': {e}")
