@@ -1,5 +1,6 @@
 """Main training file"""
 
+import os
 import random
 import sys
 
@@ -11,7 +12,12 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_metric_learning import losses, miners
 from pytorch_metric_learning.samplers import MPerClassSampler
-from shared import GenericReIDModel, ReIDLightningModel, get_testing_transformation
+from shared import (
+    GenericReIDModel,
+    ReIDLightningModel,
+    get_testing_transformation,
+    parse_checkpoint_filename,
+)
 from timm.data import resolve_data_config
 from torch.utils.data import ConcatDataset, DataLoader
 
@@ -53,16 +59,31 @@ def get_veri_split(train_dataset: VeRiDataset, veri_percent=0.1, seed=42):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python train.py <checkpoints_path> <model_name>")
+    if len(sys.argv) not in [3, 4]:
+        print("Usage: python train.py <checkpoints_path> <model_name> [--fit]")
         sys.exit(1)
+
+    use_fit = False
+    if len(sys.argv) == 4 and sys.argv[3] == "--fit":
+        use_fit = True
 
     CHECKPOINTS_PATH = sys.argv[1]
     MODEL_NAME = sys.argv[2]
+    use_pretrained_checkpoint = False
 
-    full_veri_train_dataset = VeRiDataset(
-        img_dir="../datasets/VeRi/image_train/", transform=None
-    )
+    if "/" in MODEL_NAME:
+        use_pretrained_checkpoint = True
+        MODEL_PATH = MODEL_NAME
+        MODEL_NAME, _, _, _ = parse_checkpoint_filename(os.path.basename(MODEL_NAME))
+
+    if not (use_fit):
+        full_veri_train_dataset = VeRiDataset(
+            img_dir="../datasets/VeRi/image_train/", transform=None
+        )
+    else:
+        full_veri_train_dataset = VeRiDataset(
+            img_dir="../datasets/fit/image_train/", transform=None
+        )
     VAL_PERCENT = 0.1
 
     model = GenericReIDModel(MODEL_NAME)
@@ -112,21 +133,26 @@ if __name__ == "__main__":
         label_map=train_label_map,
     )
 
-    # create the PKU dataset, but start labeling from NUM_VERI_TRAIN_CLASSES, so that PKU labels do not overlap with VeRi labels
-    pku_train_dataset = PKUVehicleIdDataset(
-        img_dir="../datasets/VehicleID_V1.0/image/",
-        train_list_txt="../datasets/VehicleID_V1.0/train_test_split/train_list.txt",
-        transform=train_transform,
-        label_offset=NUM_VERI_TRAIN_CLASSES,  # PKU labels start after VeRi labels
-    )
+    if not use_fit:
+        # create the PKU dataset, but start labeling from NUM_VERI_TRAIN_CLASSES, so that PKU labels do not overlap with VeRi labels
+        pku_train_dataset = PKUVehicleIdDataset(
+            img_dir="../datasets/VehicleID_V1.0/image/",
+            train_list_txt="../datasets/VehicleID_V1.0/train_test_split/train_list.txt",
+            transform=train_transform,
+            label_offset=NUM_VERI_TRAIN_CLASSES,  # PKU labels start after VeRi labels
+        )
 
-    NUM_PKU_TRAIN_CLASSES = len(pku_train_dataset.id_to_class)
-    print(f"Number of classes in PKU dataset: {NUM_PKU_TRAIN_CLASSES}")
+        NUM_PKU_TRAIN_CLASSES = len(pku_train_dataset.id_to_class)
+        print(f"Number of classes in PKU dataset: {NUM_PKU_TRAIN_CLASSES}")
 
-    train_dataset = ConcatDataset([veri_train_subset, pku_train_dataset])
+        train_dataset = ConcatDataset([veri_train_subset, pku_train_dataset])
 
-    NUM_CLASSES = NUM_VERI_TRAIN_CLASSES + NUM_PKU_TRAIN_CLASSES
-    print(f"Total number of classes (VeRi + PKU): {NUM_CLASSES}")
+        NUM_CLASSES = NUM_VERI_TRAIN_CLASSES + NUM_PKU_TRAIN_CLASSES
+        print(f"Total number of classes (VeRi + PKU): {NUM_CLASSES}")
+    else:
+        train_dataset = veri_train_subset
+        NUM_CLASSES = NUM_VERI_TRAIN_CLASSES
+        print(f"Total number of classes (FIT): {NUM_CLASSES}")
 
     val_dataset = VeRiDatasetSubset(
         whole_dataset=full_veri_train_dataset,
@@ -201,5 +227,18 @@ if __name__ == "__main__":
     )
 
     # Time to train!
-    lightning_model = ReIDLightningModel(model, criterion_metric, miner)
+    if use_pretrained_checkpoint:
+        lightning_model = ReIDLightningModel(model, criterion_metric, miner)
+
+        checkpoint = torch.load(MODEL_PATH, map_location=lambda storage, loc: storage)
+        state_dict = checkpoint["state_dict"]
+
+        # Remove old loss function data
+        keys_to_remove = [k for k in state_dict.keys() if "criterion_metric" in k]
+        for k in keys_to_remove:
+            state_dict.pop(k)
+
+        lightning_model.load_state_dict(state_dict, strict=False)
+    else:
+        lightning_model = ReIDLightningModel(model, criterion_metric, miner)
     trainer.fit(lightning_model, train_loader, val_loader)

@@ -4,23 +4,27 @@ import sys
 import numpy as np
 import torch
 import torch.nn.functional as F
+from dataset import ReIDTestDataset
 from PIL import Image
 from pytorch_metric_learning import losses, miners
 from shared import (
     GenericReIDModel,
     ReIDLightningModel,
-    get_testing_transformation,
     determine_device,
+    get_testing_transformation,
+    parse_checkpoint_filename,
 )
 from timm.data import resolve_data_config
 from tqdm import tqdm
 from util import compute_reid_metrics
-from dataset import ReIDTestDataset
 
 DEVICE = determine_device()
 
-TEST_DIR = "../datasets/VeRi/image_test/"
-QUERY_DIR = "../datasets/VeRi/image_query/"
+VERI_TEST_DIR = "../datasets/VeRi/image_test/"
+VERI_QUERY_DIR = "../datasets/VeRi/image_query/"
+
+FIT_TEST_DIR = "../datasets/fit/image_test/"
+FIT_QUERY_DIR = "../datasets/fit/image_query/"
 
 
 def load_trained_model(path, model_name, num_of_classes):
@@ -90,27 +94,6 @@ def evaluate_metrics(
     )
 
 
-def parse_checkpoint_filename(filename):
-    # Expected format: reid-<model_name>-c=<num_classes>-epoch=<epoch_value>-val_mAP=<mAP_value>.ckpt
-    parts = filename.split("-")
-    if (
-        len(parts) != 5
-        or not parts[0].startswith("reid")
-        or not parts[2].startswith("c=")
-    ):
-        raise ValueError(
-            f"Unexpected checkpoint filename format: {filename}. \nExpected format: reid-<model_name>-c=<num_classes>-epoch=<epoch_value>-val_mAP=<mAP_value>.ckpt"
-        )
-    model_name = parts[1]
-    num_classes = int(parts[2][2:])  # Remove 'c=' prefix
-    epoch_part = parts[3]
-    mAP_part = parts[4]
-
-    epoch_value = int(epoch_part.split("=")[1])
-    mAP_value = float(mAP_part.split("=")[1].replace(".ckpt", ""))
-    return model_name, num_classes, epoch_value, mAP_value
-
-
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python test.py <model_checkpoint_path>")
@@ -135,23 +118,45 @@ if __name__ == "__main__":
     )
     model = load_trained_model(CHECKPOINT_PATH, MODEL_NAME, NUM_OF_CLASSES)
 
-    gallery_features, gallery_vids, gallery_cids = extract_features(
-        TEST_DIR, "Gallery", test_transform
+    veri_gallery_features, veri_gallery_vids, veri_gallery_cids = extract_features(
+        VERI_TEST_DIR, "Gallery", test_transform
     )
-    query_features, query_vids, query_cids = extract_features(
-        QUERY_DIR, "Queries", test_transform
+    veri_query_features, veri_query_vids, veri_query_cids = extract_features(
+        VERI_QUERY_DIR, "Queries", test_transform
     )
 
     mAP, cmc = evaluate_metrics(
-        query_features,
-        query_vids,
-        query_cids,
-        gallery_features,
-        gallery_vids,
-        gallery_cids,
+        veri_query_features,
+        veri_query_vids,
+        veri_query_cids,
+        veri_gallery_features,
+        veri_gallery_vids,
+        veri_gallery_cids,
     )
 
     print("\n--- Final VeRi Benchmark Results ---")
+    print(f"mAP:    {mAP:.2%}")
+    print(f"Rank-1: {cmc[0]:.2%}")
+    print(f"Rank-5: {cmc[4]:.2%}")
+    print(f"Rank-10:{cmc[9]:.2%}")
+
+    fit_gallery_features, fit_gallery_vids, fit_gallery_cids = extract_features(
+        FIT_TEST_DIR, "Gallery", test_transform
+    )
+    fit_query_features, fit_query_vids, fit_query_cids = extract_features(
+        FIT_QUERY_DIR, "Queries", test_transform
+    )
+
+    mAP, cmc = evaluate_metrics(
+        fit_query_features,
+        fit_query_vids,
+        fit_query_cids,
+        fit_gallery_features,
+        fit_gallery_vids,
+        fit_gallery_cids,
+    )
+
+    print("\n--- Final FIT Benchmark Results ---")
     print(f"mAP:    {mAP:.2%}")
     print(f"Rank-1: {cmc[0]:.2%}")
     print(f"Rank-5: {cmc[4]:.2%}")

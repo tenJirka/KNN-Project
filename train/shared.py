@@ -155,3 +155,24 @@ def determine_device():
         return torch.device("mps")
     else:
         return torch.device("cpu")
+
+
+def parse_checkpoint_filename(filename):
+    # Expected format: reid-<model_name>-c=<num_classes>-epoch=<epoch_value>-val_mAP=<mAP_value>.ckpt
+    parts = filename.split("-")
+    if (
+        len(parts) != 5
+        or not parts[0].startswith("reid")
+        or not parts[2].startswith("c=")
+    ):
+        raise ValueError(
+            f"Unexpected checkpoint filename format: {filename}. \nExpected format: reid-<model_name>-c=<num_classes>-epoch=<epoch_value>-val_mAP=<mAP_value>.ckpt"
+        )
+    model_name = parts[1]
+    num_classes = int(parts[2][2:])  # Remove 'c=' prefix
+    epoch_part = parts[3]
+    mAP_part = parts[4]
+
+    epoch_value = int(epoch_part.split("=")[1])
+    mAP_value = float(mAP_part.split("=")[1].replace(".ckpt", ""))
+    return model_name, num_classes, epoch_value, mAP_value
