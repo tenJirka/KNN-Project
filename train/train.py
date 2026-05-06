@@ -60,12 +60,21 @@ def get_veri_split(train_dataset: VeRiDataset, veri_percent=0.1, seed=42):
 
 if __name__ == "__main__":
     if len(sys.argv) not in [3, 4]:
-        print("Usage: python train.py <checkpoints_path> <model_name> [--fit]")
+        print("Usage: python train.py <checkpoints_path> <model_name> [--fit | --all]")
         sys.exit(1)
 
     use_fit = False
-    if len(sys.argv) == 4 and sys.argv[3] == "--fit":
-        use_fit = True
+    use_all = False
+    if len(sys.argv) == 4:
+        if sys.argv[3] == "--fit":
+            use_fit = True
+        elif sys.argv[3] == "--all":
+            use_all = True
+        else:
+            print(
+                "Usage: python train.py <checkpoints_path> <model_name> [--fit | --all]"
+            )
+            sys.exit(1)
 
     CHECKPOINTS_PATH = sys.argv[1]
     MODEL_NAME = sys.argv[2]
@@ -76,13 +85,13 @@ if __name__ == "__main__":
         MODEL_PATH = MODEL_NAME
         MODEL_NAME, _, _, _ = parse_checkpoint_filename(os.path.basename(MODEL_NAME))
 
-    if not (use_fit):
-        full_veri_train_dataset = VeRiDataset(
-            img_dir="../datasets/VeRi/image_train/", transform=None
+    if use_fit or use_all:
+        full_base_dataset = VeRiDataset(
+            img_dir="../datasets/fit/image_train/", transform=None
         )
     else:
-        full_veri_train_dataset = VeRiDataset(
-            img_dir="../datasets/fit/image_train/", transform=None
+        full_base_dataset = VeRiDataset(
+            img_dir="../datasets/VeRi/image_train/", transform=None
         )
     VAL_PERCENT = 0.1
 
@@ -119,43 +128,63 @@ if __name__ == "__main__":
     )
 
     train_subset_indices, val_subset_indices, train_label_map = get_veri_split(
-        full_veri_train_dataset, veri_percent=VAL_PERCENT
+        full_base_dataset, veri_percent=VAL_PERCENT
     )
 
-    # Number of ids in VeRi train dataset (subset)
-    NUM_VERI_TRAIN_CLASSES = len(train_label_map)
-    print(f"Number of classes in training set: {NUM_VERI_TRAIN_CLASSES}")
+    NUM_BASE_TRAIN_CLASSES = len(train_label_map)
+    print(f"Number of classes in base training set: {NUM_BASE_TRAIN_CLASSES}")
 
-    veri_train_subset = VeRiDatasetSubset(
-        whole_dataset=full_veri_train_dataset,
+    base_train_subset = VeRiDatasetSubset(
+        whole_dataset=full_base_dataset,
         subset_indices=train_subset_indices,
         transform=train_transform,
         label_map=train_label_map,
     )
 
+    train_datasets = [base_train_subset]
+    NUM_CLASSES = NUM_BASE_TRAIN_CLASSES
+
+    # Pokud použijeme --all, přidáme navíc celý VeRi dataset
+    if use_all:
+        full_veri_dataset = VeRiDataset(
+            img_dir="../datasets/VeRi/image_train/", transform=None
+        )
+        # VeRi třídy posuneme tak, aby neolidovaly s FIT sadou
+        veri_label_map = {
+            global_class: global_class + NUM_CLASSES
+            for raw_id, global_class in full_veri_dataset.id_to_class.items()
+        }
+
+        veri_train_subset = VeRiDatasetSubset(
+            whole_dataset=full_veri_dataset,
+            subset_indices=list(range(len(full_veri_dataset.img_names))),
+            transform=train_transform,
+            label_map=veri_label_map,
+        )
+        train_datasets.append(veri_train_subset)
+        NUM_VERI_CLASSES = len(full_veri_dataset.id_to_class)
+        print(f"Number of classes in additional VeRi dataset: {NUM_VERI_CLASSES}")
+        NUM_CLASSES += NUM_VERI_CLASSES
+
     if not use_fit:
-        # create the PKU dataset, but start labeling from NUM_VERI_TRAIN_CLASSES, so that PKU labels do not overlap with VeRi labels
+        # Původní logika bez flagů a nebo --all (PKU dataset se přidává)
         pku_train_dataset = PKUVehicleIdDataset(
             img_dir="../datasets/VehicleID_V1.0/image/",
             train_list_txt="../datasets/VehicleID_V1.0/train_test_split/train_list.txt",
             transform=train_transform,
-            label_offset=NUM_VERI_TRAIN_CLASSES,  # PKU labels start after VeRi labels
+            label_offset=NUM_CLASSES,
         )
 
+        train_datasets.append(pku_train_dataset)
         NUM_PKU_TRAIN_CLASSES = len(pku_train_dataset.id_to_class)
         print(f"Number of classes in PKU dataset: {NUM_PKU_TRAIN_CLASSES}")
+        NUM_CLASSES += NUM_PKU_TRAIN_CLASSES
 
-        train_dataset = ConcatDataset([veri_train_subset, pku_train_dataset])
-
-        NUM_CLASSES = NUM_VERI_TRAIN_CLASSES + NUM_PKU_TRAIN_CLASSES
-        print(f"Total number of classes (VeRi + PKU): {NUM_CLASSES}")
-    else:
-        train_dataset = veri_train_subset
-        NUM_CLASSES = NUM_VERI_TRAIN_CLASSES
-        print(f"Total number of classes (FIT): {NUM_CLASSES}")
+    train_dataset = ConcatDataset(train_datasets)
+    print(f"Total number of classes: {NUM_CLASSES}")
 
     val_dataset = VeRiDatasetSubset(
-        whole_dataset=full_veri_train_dataset,
+        whole_dataset=full_base_dataset,
         subset_indices=val_subset_indices,
         transform=validation_transform,
     )
@@ -173,12 +202,30 @@ if __name__ == "__main__":
 
     print("Extracting labels for MPerClassSampler...")
     train_labels = []
+
+    # Labels for the base train dataset
     for idx in train_subset_indices:
-        img_name = full_veri_train_dataset.img_names[idx]
+        img_name = full_base_dataset.img_names[idx]
         raw_id = int(img_name.split("_")[0])
-        global_label = full_veri_train_dataset.id_to_class[raw_id]
+        global_label = full_base_dataset.id_to_class[raw_id]
         mapped_label = train_label_map[global_label]
         train_labels.append(mapped_label)
+
+    # Labels for VeRi dataset if --all
+    if use_all:
+        for img_name in full_veri_dataset.img_names:
+            raw_id = int(img_name.split("_")[0])
+            global_label = full_veri_dataset.id_to_class[raw_id]
+            train_labels.append(veri_label_map[global_label])
+
+    # Labels for PKU dataset if appended (oprava chybějících labelů v původním kódu)
+    if not use_fit:
+        print("Extracting PKU labels (this may take a moment)...")
+        original_transform = pku_train_dataset.transform
+        pku_train_dataset.transform = None
+        for i in range(len(pku_train_dataset)):
+            train_labels.append(pku_train_dataset[i][1])
+        pku_train_dataset.transform = original_transform
 
     # m=4 means for every car include 4 images (50 different cars per batch for 200 batch size)
     sampler = MPerClassSampler(
