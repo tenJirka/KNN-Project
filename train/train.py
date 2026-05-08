@@ -7,7 +7,7 @@ import sys
 import pytorch_lightning as pl
 import torch
 import torchvision.transforms as T
-from dataset import PKUVehicleIdDataset, VeRiDataset, VeRiDatasetSubset
+from dataset import VeRiDataset, VeRiDatasetSubset
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_metric_learning import losses, miners
@@ -104,7 +104,6 @@ if __name__ == "__main__":
     img_mean = data_config["mean"]
     img_std = data_config["std"]
 
-    # TODO: Do more research on transformations
     train_transform = T.Compose(
         [
             T.Resize(input_size),
@@ -144,12 +143,11 @@ if __name__ == "__main__":
     train_datasets = [base_train_subset]
     NUM_CLASSES = NUM_BASE_TRAIN_CLASSES
 
-    # Pokud použijeme --all, přidáme navíc celý VeRi dataset
+    # Add veri if use_all
     if use_all:
         full_veri_dataset = VeRiDataset(
             img_dir="../datasets/VeRi/image_train/", transform=None
         )
-        # VeRi třídy posuneme tak, aby neolidovaly s FIT sadou
         veri_label_map = {
             global_class: global_class + NUM_CLASSES
             for raw_id, global_class in full_veri_dataset.id_to_class.items()
@@ -165,20 +163,6 @@ if __name__ == "__main__":
         NUM_VERI_CLASSES = len(full_veri_dataset.id_to_class)
         print(f"Number of classes in additional VeRi dataset: {NUM_VERI_CLASSES}")
         NUM_CLASSES += NUM_VERI_CLASSES
-
-    if not use_fit:
-        # Původní logika bez flagů a nebo --all (PKU dataset se přidává)
-        pku_train_dataset = PKUVehicleIdDataset(
-            img_dir="../datasets/VehicleID_V1.0/image/",
-            train_list_txt="../datasets/VehicleID_V1.0/train_test_split/train_list.txt",
-            transform=train_transform,
-            label_offset=NUM_CLASSES,
-        )
-
-        train_datasets.append(pku_train_dataset)
-        NUM_PKU_TRAIN_CLASSES = len(pku_train_dataset.id_to_class)
-        print(f"Number of classes in PKU dataset: {NUM_PKU_TRAIN_CLASSES}")
-        NUM_CLASSES += NUM_PKU_TRAIN_CLASSES
 
     train_dataset = ConcatDataset(train_datasets)
     print(f"Total number of classes: {NUM_CLASSES}")
@@ -218,21 +202,13 @@ if __name__ == "__main__":
             global_label = full_veri_dataset.id_to_class[raw_id]
             train_labels.append(veri_label_map[global_label])
 
-    # Labels for PKU dataset if appended (oprava chybějících labelů v původním kódu)
-    if not use_fit:
-        print("Extracting PKU labels (this may take a moment)...")
-        original_transform = pku_train_dataset.transform
-        pku_train_dataset.transform = None
-        for i in range(len(pku_train_dataset)):
-            train_labels.append(pku_train_dataset[i][1])
-        pku_train_dataset.transform = original_transform
-
     # m=4 means for every car include 4 images (50 different cars per batch for 200 batch size)
     sampler = MPerClassSampler(
         labels=train_labels,
         m=4,
         batch_size=batch_size,
-        length_before_new_iter=len(train_dataset),
+        length_before_new_iter=len(train_dataset)
+        * 5,  # This helps to improve learning, but is questionable
     )
 
     train_loader = DataLoader(
