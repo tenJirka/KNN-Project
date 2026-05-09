@@ -23,8 +23,10 @@ petry install
 
 Training scripts are in `train/`.
 
+Usage:
+
 ```bash
-Usage: python train.py <checkpoints_path> <model_name>
+python train.py <checkpoints_path> <model_name/checkpoint_path> [--fit/--all]
 ```
 
 Will train `model_name` on `VeRi` dataset for at least 15 epochs with `batch_size=200`.
@@ -32,6 +34,20 @@ Will train `model_name` on `VeRi` dataset for at least 15 epochs with `batch_siz
 Then it will be stopped by early stopping based on `mAP`, `min_delta=0.003` and `patience=5`.
 
 Top 3 checkpoints will be saved to `checkpoints_path`.
+
+By default, model is trained only on VeRi dataset. If `--fit` is specified, training is done on FIT dataset only and if `--all`, training is done on both.
+
+### Testing
+
+Testing scripts are in `train/`.
+
+Usage:
+
+```bash
+python test.py <checkpoint_path>
+```
+
+This will evaluate model on both VeRi and FIT datasets.
 
 ## Datasets
 
